@@ -40,6 +40,7 @@ export const paramDef = {
 		sinceId: { type: 'string', format: 'misskey:id' },
 		untilId: { type: 'string', format: 'misskey:id' },
 		limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+		origin: { type: 'string', enum: ['local', 'remote', 'combined'], default: 'combined' },
 		offset: { type: 'integer', default: 0 },
 		host: {
 			type: 'string',
@@ -75,6 +76,12 @@ export default class extends Endpoint<typeof meta, typeof paramDef> {
 			}
 	
 			const query = this.queryService.makePaginationQuery(this.notesRepository.createQueryBuilder('note'), ps.sinceId, ps.untilId);
+
+			if (ps.origin === 'local') {
+				query.andWhere('note.userHost IS NULL');
+			} else if (ps.origin === 'remote') {
+				query.andWhere('note.userHost IS NOT NULL');
+			}
 
 			if (ps.userId) {
 				query.andWhere('note.userId = :userId', { userId: ps.userId });
