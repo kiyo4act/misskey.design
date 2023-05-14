@@ -1763,6 +1763,7 @@ _instanceCharts:
 _timelines:
   home: "Startseite"
   local: "Lokal"
+  media: "Medien"
   social: "Sozial"
   global: "Global"
 _play:
