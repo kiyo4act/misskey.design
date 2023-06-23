@@ -120,7 +120,6 @@ export class SearchService {
 		userId?: Note['userId'] | null;
 		channelId?: Note['channelId'] | null;
 		host?: string | null;
-		origin?: string | null;
 	}, pagination: {
 		untilId?: Note['id'];
 		sinceId?: Note['id'];
@@ -161,12 +160,6 @@ export class SearchService {
 				query.andWhere('note.userId = :userId', { userId: opts.userId });
 			} else if (opts.channelId) {
 				query.andWhere('note.channelId = :channelId', { channelId: opts.channelId });
-			}
-
-			if (opts.origin === 'local') {
-				query.andWhere('note.userHost IS NULL');
-			} else if (opts.origin === 'remote') {
-				query.andWhere('note.userHost IS NOT NULL');
 			}
 
 			query
