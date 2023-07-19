@@ -11,6 +11,8 @@
 			:src="media.url"
 			:title="media.name"
 			controls
+			controlsList="nodownload"
+			oncontextmenu="return false;"
 			preload="metadata"
 			@volumechange="volumechange"
 		/>

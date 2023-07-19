@@ -15,6 +15,8 @@
 		:alt="video.comment"
 		preload="none"
 		controls
+		controlsList="nodownload"
+		oncontextmenu="return false;"
 		@contextmenu.stop
 	>
 		<source 
