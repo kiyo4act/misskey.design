@@ -22,6 +22,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<audio
 			ref="audioEl"
 			preload="metadata"
+			controlsList="nodownload"
+			oncontextmenu="return false;"
 		>
 			<source :src="audio.url">
 		</audio>

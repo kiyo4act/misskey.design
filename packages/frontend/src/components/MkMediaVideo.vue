@@ -31,6 +31,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 			:alt="video.comment"
 			preload="metadata"
 			playsinline
+			controlsList="nodownload"
+			oncontextmenu="return false;"
 		>
 			<source :src="video.url">
 		</video>
