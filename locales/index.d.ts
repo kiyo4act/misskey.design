@@ -5113,6 +5113,10 @@ export interface Locale extends ILocale {
              */
             "local": string;
             /**
+             * このサーバーにいるユーザー全員のメディア付き投稿を見られます。
+             */
+            "media": string;
+            /**
              * ホームタイムラインとローカルタイムラインの投稿が両方表示されます。
              */
             "social": string;
@@ -5249,6 +5253,10 @@ export interface Locale extends ILocale {
          * ローカルタイムラインでは、このサーバーにいるユーザー全員の投稿を見られます。
          */
         "local": string;
+        /**
+         * メディアタイムラインでは、このサーバーにいるユーザー全員のメディア付き投稿を見られます。
+         */
+        "media": string;
         /**
          * ソーシャルタイムラインには、ホームタイムラインとローカルタイムラインの投稿が両方表示されます。
          */
@@ -8495,6 +8503,10 @@ export interface Locale extends ILocale {
          * ローカル
          */
         "local": string;
+        /**
+         * メディア
+         */
+        "media": string;
         /**
          * ソーシャル
          */

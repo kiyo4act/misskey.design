@@ -29,7 +29,7 @@ import { defaultStore } from '@/store.js';
 import { Paging } from '@/components/MkPagination.vue';
 
 const props = withDefaults(defineProps<{
-	src: 'home' | 'local' | 'social' | 'global' | 'mentions' | 'directs' | 'list' | 'antenna' | 'channel' | 'role';
+	src: 'home' | 'local' | 'media' | 'social' | 'global' | 'mentions' | 'directs' | 'list' | 'antenna' | 'channel' | 'role';
 	list?: string;
 	antenna?: string;
 	channel?: string;
@@ -110,6 +110,12 @@ function connectChannel() {
 			withReplies: props.withReplies,
 			withFiles: props.onlyFiles ? true : undefined,
 		});
+	} else if (props.src === 'media') {
+		connection = stream.useChannel('localTimeline', {
+			withRenotes: false,
+			withReplies: false,
+			withFiles: true,
+		});
 	} else if (props.src === 'social') {
 		connection = stream.useChannel('hybridTimeline', {
 			withRenotes: props.withRenotes,
@@ -179,6 +185,13 @@ function updatePaginationQuery() {
 			withRenotes: props.withRenotes,
 			withReplies: props.withReplies,
 			withFiles: props.onlyFiles ? true : undefined,
+		};
+	} else if (props.src === 'media') {
+		endpoint = 'notes/local-timeline';
+		query = {
+			withRenotes: false,
+			withReplies: false,
+			withFiles: true,
 		};
 	} else if (props.src === 'social') {
 		endpoint = 'notes/hybrid-timeline';

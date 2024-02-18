@@ -9,7 +9,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 	<MkSpacer :contentMax="800">
 		<MkHorizontalSwipe v-model:tab="src" :tabs="$i ? headerTabs : headerTabsWhenNotLogin">
 			<div :key="src" ref="rootEl" v-hotkey.global="keymap">
-				<MkInfo v-if="['home', 'local', 'social', 'global'].includes(src) && !defaultStore.reactiveState.timelineTutorials.value[src]" style="margin-bottom: var(--margin);" closable @close="closeTutorial()">
+				<MkInfo v-if="['home', 'local','media', 'social', 'global'].includes(src) && !defaultStore.reactiveState.timelineTutorials.value[src]" style="margin-bottom: var(--margin);" closable @close="closeTutorial()">
 					{{ i18n.ts._timelineDescription[src] }}
 				</MkInfo>
 				<MkPostForm v-if="defaultStore.reactiveState.showFixedPostForm.value" :class="$style.postForm" class="post-form _panel" fixed style="margin-bottom: var(--margin);"/>
@@ -67,7 +67,7 @@ const rootEl = shallowRef<HTMLElement>();
 
 const queue = ref(0);
 const srcWhenNotSignin = ref<'local' | 'global'>(isLocalTimelineAvailable ? 'local' : 'global');
-const src = computed<'home' | 'local' | 'social' | 'global' | `list:${string}`>({
+const src = computed<'home' | 'local' | 'media' | 'social' | 'global' | `list:${string}`>({
 	get: () => ($i ? defaultStore.reactiveState.tl.value.src : srcWhenNotSignin.value),
 	set: (x) => saveSrc(x),
 });
@@ -234,7 +234,7 @@ function focus(): void {
 }
 
 function closeTutorial(): void {
-	if (!['home', 'local', 'social', 'global'].includes(src.value)) return;
+	if (!['home', 'local', 'media', 'social', 'global'].includes(src.value)) return;
 	const before = defaultStore.state.timelineTutorials;
 	before[src.value] = true;
 	defaultStore.set('timelineTutorials', before);
@@ -294,6 +294,11 @@ const headerTabs = computed(() => [...(defaultStore.reactiveState.pinnedUserList
 	key: 'local',
 	title: i18n.ts._timelines.local,
 	icon: 'ti ti-planet',
+	iconOnly: true,
+}, {
+	key: 'media',
+	title: i18n.ts._timelines.media,
+	icon: 'ti ti-photo',
 	iconOnly: true,
 }, {
 	key: 'social',
