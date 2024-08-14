@@ -10,7 +10,7 @@ import type { Config } from '@/config.js';
 import { bindThis } from '@/decorators.js';
 import { MiNote } from '@/models/Note.js';
 import { MiUser } from '@/models/_.js';
-import type { NotesRepository } from '@/models/_.js';
+import type { NotesRepository, MutingsRepository, BlockingsRepository } from '@/models/_.js';
 import { sqlLikeEscape } from '@/misc/sql-like-escape.js';
 import { isUserRelated } from '@/misc/is-user-related.js';
 import { CacheService } from '@/core/CacheService.js';
@@ -19,7 +19,7 @@ import { IdService } from '@/core/IdService.js';
 import type { Index, MeiliSearch } from 'meilisearch';
 
 type K = string;
-type V = string | number | boolean;
+type V = string | number | boolean | string[];
 type Q =
 	{ op: '=', k: K, v: V } |
 	{ op: '!=', k: K, v: V } |
@@ -31,7 +31,8 @@ type Q =
 	{ op: 'is not null', k: K} |
 	{ op: 'and', qs: Q[] } |
 	{ op: 'or', qs: Q[] } |
-	{ op: 'not', q: Q };
+	{ op: 'not', q: Q } |
+	{ op: 'in', k: K, v: string[] };
 
 function compileValue(value: V): string {
 	if (typeof value === 'string') {
@@ -40,6 +41,8 @@ function compileValue(value: V): string {
 		return value.toString();
 	} else if (typeof value === 'boolean') {
 		return value.toString();
+	} else if (Array.isArray(value) ) {
+		return value.join(', ');
 	}
 	throw new Error('unrecognized value');
 }
@@ -57,6 +60,7 @@ function compileQuery(q: Q): string {
 		case 'is null': return `(${q.k} IS NULL)`;
 		case 'is not null': return `(${q.k} IS NOT NULL)`;
 		case 'not': return `(NOT ${compileQuery(q.q)})`;
+		case 'in': return `(${q.k} IN [${compileValue(q.v)}])`;
 		default: throw new Error('unrecognized query operator');
 	}
 }
@@ -75,6 +79,12 @@ export class SearchService {
 
 		@Inject(DI.notesRepository)
 		private notesRepository: NotesRepository,
+
+		@Inject(DI.mutingsRepository)
+		private mutingsRepository: MutingsRepository,
+
+		@Inject(DI.blockingsRepository)
+		private blockingsRepository: BlockingsRepository,
 
 		private cacheService: CacheService,
 		private queryService: QueryService,
@@ -182,6 +192,30 @@ export class SearchService {
 					filter.qs.push({ op: '=', k: 'userHost', v: opts.host });
 				}
 			}
+
+			if (me) {
+				const nonVisibleUserIds:string[] = [];
+				const mutings = await this.mutingsRepository.createQueryBuilder('muting')
+					.select('muting.muteeId')
+					.where('muting.muterId = :muterId', { muterId: me.id })
+					.getMany();
+				mutings.forEach(muting => {
+					nonVisibleUserIds.push(muting.muteeId);
+				});
+
+				const blockings = await this.blockingsRepository.createQueryBuilder('blocking')
+					.select('blocking.blockerId')
+					.where('blocking.blockeeId = :blockeeId', { blockeeId: me.id })
+					.getMany();
+				blockings.forEach(blocking => {
+					nonVisibleUserIds.push(blocking.blockerId);
+				});
+
+				if (nonVisibleUserIds.length > 0) {
+					filter.qs.push({ op: 'not', q: { op: 'in', k: 'userId', v: nonVisibleUserIds } });
+				}
+			}
+
 			const res = await this.meilisearchNoteIndex!.search(q, {
 				sort: ['createdAt:desc'],
 				matchingStrategy: 'all',
