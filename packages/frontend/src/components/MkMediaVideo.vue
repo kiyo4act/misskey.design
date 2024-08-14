@@ -36,6 +36,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 			preload="metadata"
 			controls
 			@keydown.prevent
+			controlsList="nodownload"
+			oncontextmenu="return false;"
 		>
 			<source :src="video.url">
 		</video>
@@ -57,6 +59,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 			playsinline
 			@keydown.prevent
 			@click.self="togglePlayPause"
+			controlsList="nodownload"
+			oncontextmenu="return false;"
 		>
 			<source :src="video.url">
 		</video>
