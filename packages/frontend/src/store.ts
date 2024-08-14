@@ -73,6 +73,7 @@ export const defaultStore = markRaw(new Storage('base', {
 			home: false,
 			local: false,
 			social: false,
+			media: false,
 			global: false,
 		},
 	},
