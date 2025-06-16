@@ -102,6 +102,8 @@ async function setType() {
 		}, {
 			value: 'social' as const, text: i18n.ts._timelines.social,
 		}, {
+			value: 'media' as const, text: i18n.ts._timelines.media,
+		}, {
 			value: 'global' as const, text: i18n.ts._timelines.global,
 		}],
 	});
