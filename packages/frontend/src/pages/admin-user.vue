@@ -240,7 +240,7 @@ const props = withDefaults(defineProps<{
 	userId: string;
 	initialTab?: string;
 }>(), {
-	initialTab: 'overview',
+	initialTab: 'drive',
 });
 
 const result = await _fetch_();
