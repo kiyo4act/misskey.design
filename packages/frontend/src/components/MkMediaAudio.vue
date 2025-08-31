@@ -30,6 +30,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 			controls
 			:class="$style.nativeAudio"
 			@keydown.prevent
+			controlsList="nodownload"
+			oncontextmenu="return false;"
 		>
 			<source :src="audio.url">
 		</audio>
