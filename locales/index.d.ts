@@ -6330,6 +6330,10 @@ export interface Locale extends ILocale {
              */
             "social": string;
             /**
+             * ソーシャルタイムラインとローカルタイムラインのメディア付き投稿が両方表示されます。
+             */
+            "media": string;
+            /**
              * 接続している他のすべてのサーバーからの投稿を見られます。
              */
             "global": string;
@@ -6466,6 +6470,10 @@ export interface Locale extends ILocale {
          * ソーシャルタイムラインには、ホームタイムラインとローカルタイムラインの投稿が両方表示されます。
          */
         "social": string;
+        /**
+         * メディアタイムラインには、ホームタイムラインとローカルタイムラインのメディア付き投稿が両方表示されます。
+         */
+        "media": string;
         /**
          * グローバルタイムラインでは、接続している他のすべてのサーバーからの投稿を見られます。
          */
@@ -9962,6 +9970,10 @@ export interface Locale extends ILocale {
          * ソーシャル
          */
         "social": string;
+        /**
+         * メディア
+         */
+        "media": string;
         /**
          * グローバル
          */

@@ -138,6 +138,15 @@ if (props.src === 'antenna') {
 		})),
 		useShallowRef: true,
 	}));
+} else if (props.src === 'media') {
+	paginator = markRaw(new Paginator('notes/hybrid-timeline', {
+		computedParams: computed(() => ({
+			withRenotes: false,
+			withReplies: false,
+			withFiles: true,
+		})),
+		useShallowRef: true,
+	}));
 } else if (props.src === 'global') {
 	paginator = markRaw(new Paginator('notes/global-timeline', {
 		computedParams: computed(() => ({
@@ -338,6 +347,13 @@ function connectChannel() {
 			withRenotes: props.withRenotes,
 			withReplies: props.withReplies,
 			withFiles: props.onlyFiles ? true : undefined,
+		});
+		connections.hybridTimeline.on('note', prepend);
+	} else if (props.src === 'media') {
+		connections.hybridTimeline = stream.useChannel('hybridTimeline', {
+			withRenotes: false,
+			withReplies: false,
+			withFiles: true,
 		});
 		connections.hybridTimeline.on('note', prepend);
 	} else if (props.src === 'global') {
