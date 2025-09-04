@@ -111,7 +111,7 @@ export class CleanRemoteNotesProcessorService {
 		}
 
 		// start with a conservative limit and adjust it based on the query duration
-		const minimumLimit = 5;
+		const minimumLimit = 10;
 		let currentLimit = 10;
 		let cursorLeft = '0';
 
