@@ -160,7 +160,7 @@ export class CleanRemoteNotesProcessorService {
 			.addSelect('unremovable."id" IS NULL', 'isRemovable')
 			.addSelect(`BOOL_OR("${candidateNotesCteName}"."isBase")`, 'isBase')
 			.addCommonTableExpression(
-				`((SELECT "base".* FROM (${candidateNotesQueryBase.orderBy('note.id', 'ASC').limit(':currentLimit').getQuery()}) AS "base") UNION ${candidateNotesQueryInductive.getQuery()})`,
+				`((SELECT "base".* FROM (${candidateNotesQueryBase.orderBy('note.id', 'ASC').getQuery()} limit :currentLimit ) AS "base") UNION ${candidateNotesQueryInductive.getQuery()})`,
 				candidateNotesCteName,
 				{ recursive: true },
 			)
