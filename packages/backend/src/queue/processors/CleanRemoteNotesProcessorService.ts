@@ -160,7 +160,7 @@ export class CleanRemoteNotesProcessorService {
 			.addSelect('unremovable."id" IS NULL', 'isRemovable')
 			.addSelect(`BOOL_OR("${candidateNotesCteName}"."isBase")`, 'isBase')
 			.addCommonTableExpression(
-				`((SELECT "base".* FROM (${candidateNotesQueryBase.orderBy('note.id', 'ASC').limit(currentLimit).getQuery()}) AS "base") UNION ${candidateNotesQueryInductive.getQuery()})`,
+				`((SELECT "base".* FROM (${candidateNotesQueryBase.orderBy('note.id', 'ASC').limit(':currentLimit').getQuery()}) AS "base") UNION ${candidateNotesQueryInductive.getQuery()})`,
 				candidateNotesCteName,
 				{ recursive: true },
 			)
@@ -206,7 +206,7 @@ export class CleanRemoteNotesProcessorService {
 
 			try {
 				noteIds = await candidateNotesQuery.setParameters(
-					{ newestLimit, cursorLeft },
+					{ newestLimit, cursorLeft, currentLimit },
 				).getRawMany<{ id: MiNote['id'], isRemovable: boolean, isBase: boolean }>();
 			} catch (e) {
 				if (currentLimit > minimumLimit && e instanceof QueryFailedError && e.driverError?.code === '57014') {
@@ -264,7 +264,7 @@ export class CleanRemoteNotesProcessorService {
 
 			cursorLeft = noteIds.filter(result => result.isBase).reduce((max, { id }) => id > max ? id : max, cursorLeft);
 
-			job.log(`Deleted ${noteIds.length} notes; ${Date.now() - batchBeginAt}ms`);
+			job.log(`Deleted ${deletableNoteIds.length} notes; limit ${currentLimit}; ${Date.now() - batchBeginAt}ms`);
 
 			if (process.env.NODE_ENV !== 'test') {
 				await setTimeout(Math.min(1000 * 5, queryDuration)); // Wait a moment to avoid overwhelming the db
