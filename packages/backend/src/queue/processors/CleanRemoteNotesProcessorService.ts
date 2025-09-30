@@ -111,8 +111,8 @@ export class CleanRemoteNotesProcessorService {
 		}
 
 		// start with a conservative limit and adjust it based on the query duration
-		const minimumLimit = 200;
-		let currentLimit = 500;
+		const minimumLimit = 10;
+		let currentLimit = 100;
 		let cursorLeft = '0';
 
 		const candidateNotesCteName = 'candidate_notes';
@@ -160,7 +160,7 @@ export class CleanRemoteNotesProcessorService {
 			.addSelect('unremovable."id" IS NULL', 'isRemovable')
 			.addSelect(`BOOL_OR("${candidateNotesCteName}"."isBase")`, 'isBase')
 			.addCommonTableExpression(
-				`((SELECT "base".* FROM (${candidateNotesQueryBase.orderBy('note.id', 'ASC').getQuery()} limit :currentLimit ) AS "base") UNION ${candidateNotesQueryInductive.getQuery()})`,
+				`((SELECT "base".* FROM (${candidateNotesQueryBase.orderBy('note.id', 'ASC').limit(500).getQuery()}) AS "base") UNION ${candidateNotesQueryInductive.getQuery()})`,
 				candidateNotesCteName,
 				{ recursive: true },
 			)
@@ -206,7 +206,7 @@ export class CleanRemoteNotesProcessorService {
 
 			try {
 				noteIds = await candidateNotesQuery.setParameters(
-					{ newestLimit, cursorLeft, currentLimit },
+					{ newestLimit, cursorLeft },
 				).getRawMany<{ id: MiNote['id'], isRemovable: boolean, isBase: boolean }>();
 			} catch (e) {
 				if (currentLimit > minimumLimit && e instanceof QueryFailedError && e.driverError?.code === '57014') {
@@ -226,13 +226,13 @@ export class CleanRemoteNotesProcessorService {
 			const queryDuration = performance.now() - queryBegin;
 			// try to adjust such that each query takes about 1~5 seconds and reasonable NodeJS heap so the task stays responsive
 			// this should not oscillate..
-			if (queryDuration > 5000 || noteIds.length > 5000) {
-				currentLimit = Math.floor(currentLimit * 0.5);
-			} else if (queryDuration < 1000 && noteIds.length < 1000) {
-				currentLimit = Math.floor(currentLimit * 1.5);
-			}
+			// if (queryDuration > 5000 || noteIds.length > 5000) {
+			// 	currentLimit = Math.floor(currentLimit * 0.5);
+			// } else if (queryDuration < 1000 && noteIds.length < 1000) {
+			// 	currentLimit = Math.floor(currentLimit * 1.5);
+			// }
 			// clamp to a sane range
-			currentLimit = Math.min(Math.max(currentLimit, minimumLimit), 5000);
+			// currentLimit = Math.min(Math.max(currentLimit, minimumLimit), 5000);
 
 			const deletableNoteIds = noteIds.filter(result => result.isRemovable).map(result => result.id);
 			if (deletableNoteIds.length > 0) {
@@ -264,7 +264,7 @@ export class CleanRemoteNotesProcessorService {
 
 			cursorLeft = noteIds.filter(result => result.isBase).reduce((max, { id }) => id > max ? id : max, cursorLeft);
 
-			job.log(`Deleted ${deletableNoteIds.length} notes; limit ${currentLimit}; ${Date.now() - batchBeginAt}ms`);
+			job.log(`Deleted ${deletableNoteIds.length} notes; ${Date.now() - batchBeginAt}ms`);
 
 			if (process.env.NODE_ENV !== 'test') {
 				await setTimeout(Math.min(1000 * 5, queryDuration)); // Wait a moment to avoid overwhelming the db
