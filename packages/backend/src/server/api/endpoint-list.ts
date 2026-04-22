@@ -442,4 +442,7 @@ export * as 'chat/rooms/invitations/inbox' from './endpoints/chat/rooms/invitati
 export * as 'chat/rooms/invitations/outbox' from './endpoints/chat/rooms/invitations/outbox.js';
 export * as 'chat/history' from './endpoints/chat/history.js';
 export * as 'chat/read-all' from './endpoints/chat/read-all.js';
+export * as 'chat/drawings/create' from './endpoints/chat/drawings/create.js';
+export * as 'chat/drawings/update' from './endpoints/chat/drawings/update.js';
+export * as 'chat/drawings/show' from './endpoints/chat/drawings/show.js';
 export * as 'v2/admin/emoji/list' from './endpoints/v2/admin/emoji/list.js';

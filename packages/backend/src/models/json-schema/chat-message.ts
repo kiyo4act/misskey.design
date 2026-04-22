@@ -55,6 +55,15 @@ export const packedChatMessageSchema = {
 			optional: true, nullable: true,
 			ref: 'DriveFile',
 		},
+		drawingId: {
+			type: 'string',
+			optional: true, nullable: true,
+		},
+		drawing: {
+			type: 'object',
+			optional: true, nullable: true,
+			ref: 'ChatDrawingLite',
+		},
 		isRead: {
 			type: 'boolean',
 			optional: true, nullable: false,
@@ -123,6 +132,15 @@ export const packedChatMessageLiteSchema = {
 			optional: true, nullable: true,
 			ref: 'DriveFile',
 		},
+		drawingId: {
+			type: 'string',
+			optional: true, nullable: true,
+		},
+		drawing: {
+			type: 'object',
+			optional: true, nullable: true,
+			ref: 'ChatDrawingLite',
+		},
 		reactions: {
 			type: 'array',
 			optional: false, nullable: false,
@@ -178,6 +196,15 @@ export const packedChatMessageLiteFor1on1Schema = {
 			optional: true, nullable: true,
 			ref: 'DriveFile',
 		},
+		drawingId: {
+			type: 'string',
+			optional: true, nullable: true,
+		},
+		drawing: {
+			type: 'object',
+			optional: true, nullable: true,
+			ref: 'ChatDrawingLite',
+		},
 		reactions: {
 			type: 'array',
 			optional: false, nullable: false,
@@ -232,6 +259,15 @@ export const packedChatMessageLiteForRoomSchema = {
 			type: 'object',
 			optional: true, nullable: true,
 			ref: 'DriveFile',
+		},
+		drawingId: {
+			type: 'string',
+			optional: true, nullable: true,
+		},
+		drawing: {
+			type: 'object',
+			optional: true, nullable: true,
+			ref: 'ChatDrawingLite',
 		},
 		reactions: {
 			type: 'array',

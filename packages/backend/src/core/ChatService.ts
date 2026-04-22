@@ -133,6 +133,7 @@ export class ChatService {
 		text?: string | null;
 		file?: MiDriveFile | null;
 		uri?: string | null;
+		drawingId?: string | null;
 	}): Promise<Packed<'ChatMessageLiteFor1on1'>> {
 		if (fromUser.id === toUser.id) {
 			throw new Error('yourself');
@@ -189,6 +190,7 @@ export class ChatService {
 			toUserId: toUser.id,
 			text: params.text ? params.text.trim() : null,
 			fileId: params.file ? params.file.id : null,
+			drawingId: params.drawingId ?? null,
 			reads: [],
 			uri: params.uri ?? null,
 		} satisfies Partial<MiChatMessage>;
@@ -244,6 +246,7 @@ export class ChatService {
 		text?: string | null;
 		file?: MiDriveFile | null;
 		uri?: string | null;
+		drawingId?: string | null;
 	}): Promise<Packed<'ChatMessageLiteForRoom'>> {
 		const memberships = (await this.chatRoomMembershipsRepository.findBy({ roomId: toRoom.id })).map(m => ({
 			userId: m.userId,
@@ -265,6 +268,7 @@ export class ChatService {
 			toRoomId: toRoom.id,
 			text: params.text ? params.text.trim() : null,
 			fileId: params.file ? params.file.id : null,
+			drawingId: params.drawingId ?? null,
 			reads: [],
 			uri: params.uri ?? null,
 		} satisfies Partial<MiChatMessage>;

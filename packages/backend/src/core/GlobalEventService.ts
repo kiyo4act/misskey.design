@@ -171,6 +171,38 @@ export interface ChatEventTypes {
 		user?: Packed<'UserLite'>;
 		messageId: MiChatMessage['id'];
 	};
+	drawStroke: {
+		userId: MiUser['id'];
+		drawingId: string;
+		stroke: {
+			id?: string;
+			points: number[][];
+			color: string;
+			width: number;
+			tool: 'pen' | 'eraser' | 'fill' | 'paint';
+			layer?: 'main' | 'draft';
+		};
+	};
+	drawClear: {
+		userId: MiUser['id'];
+		drawingId: string;
+	};
+	drawUndo: {
+		userId: MiUser['id'];
+		drawingId: string;
+		strokeId: string;
+	};
+	drawingUpdated: {
+		drawingId: string;
+		imageAccessKey: string;
+		updatedAt: string;
+		lastEditedById: MiUser['id'];
+	};
+	drawingPresence: {
+		drawingId: string;
+		userId: MiUser['id'];
+		user: Packed<'UserLite'>;
+	};
 }
 
 export interface ReversiEventTypes {

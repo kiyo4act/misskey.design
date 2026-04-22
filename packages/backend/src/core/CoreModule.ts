@@ -76,6 +76,7 @@ import { FeaturedService } from './FeaturedService.js';
 import { FanoutTimelineService } from './FanoutTimelineService.js';
 import { ChannelFollowingService } from './ChannelFollowingService.js';
 import { ChatService } from './ChatService.js';
+import { ChatDrawingService } from './ChatDrawingService.js';
 import { RegistryApiService } from './RegistryApiService.js';
 import { ReversiService } from './ReversiService.js';
 import { PageService } from './PageService.js';
@@ -226,6 +227,7 @@ const $FanoutTimelineEndpointService: Provider = { provide: 'FanoutTimelineEndpo
 const $ChannelFollowingService: Provider = { provide: 'ChannelFollowingService', useExisting: ChannelFollowingService };
 const $ChannelMutingService: Provider = { provide: 'ChannelMutingService', useExisting: ChannelMutingService };
 const $ChatService: Provider = { provide: 'ChatService', useExisting: ChatService };
+const $ChatDrawingService: Provider = { provide: 'ChatDrawingService', useExisting: ChatDrawingService };
 const $RegistryApiService: Provider = { provide: 'RegistryApiService', useExisting: RegistryApiService };
 const $ReversiService: Provider = { provide: 'ReversiService', useExisting: ReversiService };
 const $PageService: Provider = { provide: 'PageService', useExisting: PageService };
@@ -379,6 +381,7 @@ const $ApQuestionService: Provider = { provide: 'ApQuestionService', useExisting
 		ChannelFollowingService,
 		ChannelMutingService,
 		ChatService,
+		ChatDrawingService,
 		RegistryApiService,
 		ReversiService,
 		PageService,
@@ -529,6 +532,7 @@ const $ApQuestionService: Provider = { provide: 'ApQuestionService', useExisting
 		$ChannelFollowingService,
 		$ChannelMutingService,
 		$ChatService,
+		$ChatDrawingService,
 		$RegistryApiService,
 		$ReversiService,
 		$PageService,
@@ -679,6 +683,7 @@ const $ApQuestionService: Provider = { provide: 'ApQuestionService', useExisting
 		ChannelFollowingService,
 		ChannelMutingService,
 		ChatService,
+		ChatDrawingService,
 		RegistryApiService,
 		ReversiService,
 		PageService,
@@ -827,6 +832,7 @@ const $ApQuestionService: Provider = { provide: 'ApQuestionService', useExisting
 		$ChannelFollowingService,
 		$ChannelMutingService,
 		$ChatService,
+		$ChatDrawingService,
 		$RegistryApiService,
 		$ReversiService,
 		$PageService,

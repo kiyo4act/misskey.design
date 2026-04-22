@@ -5,11 +5,14 @@
 
 import { Inject, Injectable, Scope } from '@nestjs/common';
 import { bindThis } from '@/decorators.js';
-import type { GlobalEvents } from '@/core/GlobalEventService.js';
+import { GlobalEventService, type GlobalEvents } from '@/core/GlobalEventService.js';
 import type { JsonObject } from '@/misc/json-value.js';
 import { ChatService } from '@/core/ChatService.js';
+import { ChatDrawingService } from '@/core/ChatDrawingService.js';
+import { UserEntityService } from '@/core/entities/UserEntityService.js';
 import Channel, { type ChannelRequest } from '../channel.js';
 import { REQUEST } from '@nestjs/core';
+import { sanitizeDrawStroke } from './chat-draw-utils.js';
 
 @Injectable({ scope: Scope.TRANSIENT })
 export class ChatUserChannel extends Channel {
@@ -24,6 +27,9 @@ export class ChatUserChannel extends Channel {
 		request: ChannelRequest,
 
 		private chatService: ChatService,
+		private globalEventService: GlobalEventService,
+		private chatDrawingService: ChatDrawingService,
+		private userEntityService: UserEntityService,
 	) {
 		super(request);
 	}
@@ -54,6 +60,53 @@ export class ChatUserChannel extends Channel {
 					this.chatService.readUserChatMessage(this.user!.id, this.otherId);
 				}
 				break;
+			case 'drawStroke': {
+				if (!this.otherId || !this.user) break;
+				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				if (!drawingId) break;
+				const stroke = sanitizeDrawStroke(body?.stroke);
+				if (!stroke) break;
+				this.chatDrawingService.appendLiveStroke(drawingId, stroke);
+				const payload = { userId: this.user.id, drawingId, stroke };
+				this.globalEventService.publishChatUserStream(this.user.id, this.otherId, 'drawStroke', payload);
+				this.globalEventService.publishChatUserStream(this.otherId, this.user.id, 'drawStroke', payload);
+				break;
+			}
+			case 'drawClear': {
+				if (!this.otherId || !this.user) break;
+				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				if (!drawingId) break;
+				this.chatDrawingService.clearLiveBufferForClear(drawingId);
+				const payload = { userId: this.user.id, drawingId };
+				this.globalEventService.publishChatUserStream(this.user.id, this.otherId, 'drawClear', payload);
+				this.globalEventService.publishChatUserStream(this.otherId, this.user.id, 'drawClear', payload);
+				break;
+			}
+			case 'drawingPresence': {
+				if (!this.otherId || !this.user) break;
+				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				if (!drawingId) break;
+				const userId = this.user.id;
+				const otherId = this.otherId;
+				this.userEntityService.pack(userId).then(user => {
+					const payload = { drawingId, userId, user };
+					this.globalEventService.publishChatUserStream(userId, otherId, 'drawingPresence', payload);
+					this.globalEventService.publishChatUserStream(otherId, userId, 'drawingPresence', payload);
+				}).catch(() => { /* ignore pack failure */ });
+				break;
+			}
+			case 'drawUndo': {
+				if (!this.otherId || !this.user) break;
+				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				const strokeId = typeof body?.strokeId === 'string' ? body.strokeId : null;
+				if (!drawingId || !strokeId) break;
+				if (!/^[A-Za-z0-9_-]{1,32}$/.test(strokeId)) break;
+				this.chatDrawingService.removeBufferedStrokeById(drawingId, strokeId);
+				const payload = { userId: this.user.id, drawingId, strokeId };
+				this.globalEventService.publishChatUserStream(this.user.id, this.otherId, 'drawUndo', payload);
+				this.globalEventService.publishChatUserStream(this.otherId, this.user.id, 'drawUndo', payload);
+				break;
+			}
 		}
 	}
 

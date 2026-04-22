@@ -8,6 +8,7 @@ import { id } from './util/id.js';
 import { MiUser } from './User.js';
 import { MiDriveFile } from './DriveFile.js';
 import { MiChatRoom } from './ChatRoom.js';
+import { MiChatDrawing } from './ChatDrawing.js';
 
 @Entity('chat_message')
 export class MiChatMessage {
@@ -82,4 +83,17 @@ export class MiChatMessage {
 		length: 1024, array: true, default: '{}',
 	})
 	public reactions: string[];
+
+	@Index()
+	@Column({
+		...id(),
+		nullable: true,
+	})
+	public drawingId: MiChatDrawing['id'] | null;
+
+	@ManyToOne(() => MiChatDrawing, {
+		onDelete: 'SET NULL',
+	})
+	@JoinColumn()
+	public drawing: MiChatDrawing | null;
 }

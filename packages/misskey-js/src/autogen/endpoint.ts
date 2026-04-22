@@ -222,6 +222,12 @@ import type {
 	ChartsUserReactionsResponse,
 	ChartsUsersRequest,
 	ChartsUsersResponse,
+	ChatDrawingsCreateRequest,
+	ChatDrawingsCreateResponse,
+	ChatDrawingsShowRequest,
+	ChatDrawingsShowResponse,
+	ChatDrawingsUpdateRequest,
+	ChatDrawingsUpdateResponse,
 	ChatHistoryRequest,
 	ChatHistoryResponse,
 	ChatMessagesCreateToRoomRequest,
@@ -810,6 +816,9 @@ export type Endpoints = {
 	'charts/user/pv': { req: ChartsUserPvRequest; res: ChartsUserPvResponse };
 	'charts/user/reactions': { req: ChartsUserReactionsRequest; res: ChartsUserReactionsResponse };
 	'charts/users': { req: ChartsUsersRequest; res: ChartsUsersResponse };
+	'chat/drawings/create': { req: ChatDrawingsCreateRequest; res: ChatDrawingsCreateResponse };
+	'chat/drawings/show': { req: ChatDrawingsShowRequest; res: ChatDrawingsShowResponse };
+	'chat/drawings/update': { req: ChatDrawingsUpdateRequest; res: ChatDrawingsUpdateResponse };
 	'chat/history': { req: ChatHistoryRequest; res: ChatHistoryResponse };
 	'chat/messages/create-to-room': { req: ChatMessagesCreateToRoomRequest; res: ChatMessagesCreateToRoomResponse };
 	'chat/messages/create-to-user': { req: ChatMessagesCreateToUserRequest; res: ChatMessagesCreateToUserResponse };

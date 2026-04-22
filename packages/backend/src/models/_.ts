@@ -25,6 +25,7 @@ import { MiChannelFavorite } from '@/models/ChannelFavorite.js';
 import { MiChannelFollowing } from '@/models/ChannelFollowing.js';
 import { MiChannelMuting } from "@/models/ChannelMuting.js";
 import { MiChatApproval } from '@/models/ChatApproval.js';
+import { MiChatDrawing } from '@/models/ChatDrawing.js';
 import { MiChatMessage } from '@/models/ChatMessage.js';
 import { MiChatRoom } from '@/models/ChatRoom.js';
 import { MiChatRoomInvitation } from '@/models/ChatRoomInvitation.js';
@@ -171,6 +172,7 @@ export {
 	MiChatRoomMembership,
 	MiChatRoomInvitation,
 	MiChatApproval,
+	MiChatDrawing,
 	MiBubbleGameRecord,
 	MiReversiGame,
 };
@@ -251,5 +253,6 @@ export type ChatRoomsRepository = Repository<MiChatRoom> & MiRepository<MiChatRo
 export type ChatRoomMembershipsRepository = Repository<MiChatRoomMembership> & MiRepository<MiChatRoomMembership>;
 export type ChatRoomInvitationsRepository = Repository<MiChatRoomInvitation> & MiRepository<MiChatRoomInvitation>;
 export type ChatApprovalsRepository = Repository<MiChatApproval> & MiRepository<MiChatApproval>;
+export type ChatDrawingsRepository = Repository<MiChatDrawing> & MiRepository<MiChatDrawing>;
 export type BubbleGameRecordsRepository = Repository<MiBubbleGameRecord> & MiRepository<MiBubbleGameRecord>;
 export type ReversiGamesRepository = Repository<MiReversiGame> & MiRepository<MiReversiGame>;

@@ -23,6 +23,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<div v-if="file" :class="$style.file" @click="file = null">{{ file.name }}</div>
 		<div :class="$style.buttons">
 			<button class="_button" :class="$style.button" @click="chooseFile"><i class="ti ti-photo-plus"></i></button>
+			<button v-if="connection" class="_button" :class="$style.button" title="みんなでお絵かき" @click="openDrawing"><i class="ti ti-brush"></i></button>
 			<button class="_button" :class="$style.button" @click="insertEmoji"><i class="ti ti-mood-happy"></i></button>
 			<button class="_button" :class="[$style.button, $style.send]" :disabled="!canSend || sending" :title="i18n.ts.send" @click="send">
 				<template v-if="!sending"><i class="ti ti-send"></i></template><template v-if="sending"><MkLoading :em="true"/></template>
@@ -34,7 +35,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { onMounted, watch, ref, shallowRef, computed, nextTick, readonly, onBeforeUnmount } from 'vue';
+import { onMounted, watch, ref, shallowRef, computed, nextTick, readonly, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import * as Misskey from 'misskey-js';
 //import insertTextAtCursor from 'insert-text-at-cursor';
 import { formatTimeString } from '@/utility/format-time-string.js';
@@ -47,10 +48,16 @@ import { prefer } from '@/preferences.js';
 import { Autocomplete } from '@/utility/autocomplete.js';
 import { emojiPicker } from '@/utility/emoji-picker.js';
 import { checkDragDataType, getDragData } from '@/drag-and-drop.js';
+import { apiChatDrawingCreate, apiSendMessageToRoomWithDrawing, apiSendMessageToUserWithDrawing } from '@/utility/chat-drawing-api.js';
+
+type ChatConnection =
+	| Misskey.IChannelConnection<Misskey.Channels['chatUser']>
+	| Misskey.IChannelConnection<Misskey.Channels['chatRoom']>;
 
 const props = defineProps<{
 	user?: Misskey.entities.UserDetailed | null;
 	room?: Misskey.entities.ChatRoom | null;
+	connection?: ChatConnection | null;
 }>();
 
 const textareaEl = shallowRef<HTMLTextAreaElement>();
@@ -165,6 +172,59 @@ function onKeydown(ev: KeyboardEvent) {
 			}
 		}
 	}
+}
+
+async function openDrawing() {
+	if (!props.connection) return;
+
+	// Step 1: ask for title
+	const titleResult = await os.inputText({
+		title: 'お絵かきキャンバスを作成',
+		text: 'タイトルを入力してください（例: アイデア共有）',
+		placeholder: 'タイトル',
+		minLength: 1,
+		maxLength: 256,
+	});
+	if (titleResult.canceled) return;
+	const title = titleResult.result.trim();
+	if (!title) return;
+
+	// Step 2: create the drawing entity (empty strokes) + send chat message referencing it.
+	// Sending the message here is what lets other participants see and join the canvas.
+	let drawingId: string;
+	try {
+		const drawing = await apiChatDrawingCreate({
+			roomId: props.room?.id ?? null,
+			otherUserId: props.user?.id ?? null,
+			title,
+			strokes: [],
+		});
+		drawingId = drawing.id;
+
+		if (props.room) {
+			await apiSendMessageToRoomWithDrawing({ toRoomId: props.room.id, drawingId });
+		} else if (props.user) {
+			await apiSendMessageToUserWithDrawing({ toUserId: props.user.id, drawingId });
+		}
+	} catch (err) {
+		console.error(err);
+		os.alert({ type: 'error', text: i18n.ts.somethingHappened });
+		return;
+	}
+
+	// Step 3: open the canvas modal in resume mode for the just-created drawing
+	const { dispose } = os.popup(
+		defineAsyncComponent(() => import('./drawing-canvas.vue')),
+		{
+			connection: props.connection,
+			roomId: props.room?.id ?? null,
+			otherUserId: props.user?.id ?? null,
+			drawingId,
+		},
+		{
+			closed: () => dispose(),
+		},
+	);
 }
 
 function chooseFile(ev: PointerEvent) {

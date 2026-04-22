@@ -4,8 +4,13 @@
  */
 
 import type { InjectionKey, Ref } from 'vue';
+import type * as Misskey from 'misskey-js';
 import type { PageMetadata } from '@/page.js';
 import type { Router } from '@/router.js';
+
+type ChatConnection =
+	| Misskey.IChannelConnection<Misskey.Channels['chatUser']>
+	| Misskey.IChannelConnection<Misskey.Channels['chatRoom']>;
 
 export const DI = {
 	routerCurrentDepth: Symbol() as InjectionKey<number>,
@@ -18,4 +23,6 @@ export const DI = {
 	mfmEmojiReactCallback: Symbol() as InjectionKey<(emoji: string) => void>,
 	inModal: Symbol() as InjectionKey<boolean>,
 	inAppSearchMarkerId: Symbol() as InjectionKey<Ref<string | null>>,
+	chatConnection: Symbol() as InjectionKey<Ref<ChatConnection | null>>,
+	chatTarget: Symbol() as InjectionKey<Ref<{ roomId: string | null; otherUserId: string | null }>>,
 };

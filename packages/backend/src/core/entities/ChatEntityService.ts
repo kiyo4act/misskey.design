@@ -5,12 +5,15 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import { DI } from '@/di-symbols.js';
-import type { MiUser, ChatMessagesRepository, MiChatMessage, ChatRoomsRepository, MiChatRoom, MiChatRoomInvitation, ChatRoomInvitationsRepository, MiChatRoomMembership, ChatRoomMembershipsRepository } from '@/models/_.js';
+import type { MiUser, ChatMessagesRepository, MiChatMessage, ChatRoomsRepository, MiChatRoom, MiChatRoomInvitation, ChatRoomInvitationsRepository, MiChatRoomMembership, ChatRoomMembershipsRepository, ChatDrawingsRepository } from '@/models/_.js';
 import { awaitAll } from '@/misc/prelude/await-all.js';
 import type { Packed } from '@/misc/json-schema.js';
 import type { } from '@/models/Blocking.js';
+import type { Config } from '@/config.js';
 import { bindThis } from '@/decorators.js';
 import { IdService } from '@/core/IdService.js';
+import { ChatDrawingService } from '@/core/ChatDrawingService.js';
+import type { MiChatDrawing } from '@/models/ChatDrawing.js';
 import { UserEntityService } from './UserEntityService.js';
 import { DriveFileEntityService } from './DriveFileEntityService.js';
 import { In } from 'typeorm';
@@ -18,6 +21,9 @@ import { In } from 'typeorm';
 @Injectable()
 export class ChatEntityService {
 	constructor(
+		@Inject(DI.config)
+		private config: Config,
+
 		@Inject(DI.chatMessagesRepository)
 		private chatMessagesRepository: ChatMessagesRepository,
 
@@ -30,10 +36,65 @@ export class ChatEntityService {
 		@Inject(DI.chatRoomMembershipsRepository)
 		private chatRoomMembershipsRepository: ChatRoomMembershipsRepository,
 
+		@Inject(DI.chatDrawingsRepository)
+		private chatDrawingsRepository: ChatDrawingsRepository,
+
 		private userEntityService: UserEntityService,
 		private driveFileEntityService: DriveFileEntityService,
 		private idService: IdService,
+		private chatDrawingService: ChatDrawingService,
 	) {
+	}
+
+	@bindThis
+	public drawingImageUrl(accessKey: string | null | undefined): string | null {
+		if (!accessKey) return null;
+		return `${this.config.url}/chat-drawings/${accessKey}.png`;
+	}
+
+	@bindThis
+	public async packDrawingLite(
+		src: MiChatDrawing['id'] | MiChatDrawing,
+	): Promise<Packed<'ChatDrawingLite'>> {
+		const drawing = typeof src === 'object' ? src : await this.chatDrawingsRepository.findOneByOrFail({ id: src });
+		return {
+			id: drawing.id,
+			updatedAt: drawing.updatedAt.toISOString(),
+			createdById: drawing.createdById,
+			lastEditedById: drawing.lastEditedById,
+			roomId: drawing.roomId,
+			title: drawing.title,
+			width: drawing.width,
+			height: drawing.height,
+			imageUrl: this.drawingImageUrl(drawing.imageAccessKey),
+		};
+	}
+
+	@bindThis
+	public async packDrawing(
+		src: MiChatDrawing['id'] | MiChatDrawing,
+		me: { id: MiUser['id'] },
+	): Promise<Packed<'ChatDrawing'>> {
+		const drawing = typeof src === 'object' ? src : await this.chatDrawingsRepository.findOneByOrFail({ id: src });
+		const otherUserId = drawing.roomId != null
+			? null
+			: (drawing.user1Id === me.id ? drawing.user2Id : drawing.user1Id);
+		// Merge persisted + live (unsaved) strokes so late joiners see the current state.
+		const liveStrokes = await this.chatDrawingService.getLiveStrokes(drawing.id);
+		return {
+			id: drawing.id,
+			createdAt: drawing.createdAt.toISOString(),
+			updatedAt: drawing.updatedAt.toISOString(),
+			createdById: drawing.createdById,
+			lastEditedById: drawing.lastEditedById,
+			roomId: drawing.roomId,
+			otherUserId,
+			title: drawing.title,
+			width: drawing.width,
+			height: drawing.height,
+			imageUrl: this.drawingImageUrl(drawing.imageAccessKey),
+			strokes: [...drawing.strokes, ...liveStrokes],
+		};
 	}
 
 	@bindThis
@@ -77,6 +138,8 @@ export class ChatEntityService {
 			toRoom: message.toRoomId ? (packedRooms?.get(message.toRoomId) ?? await this.packRoom(message.toRoom ?? message.toRoomId, me)) : undefined,
 			fileId: message.fileId,
 			file: message.fileId ? (packedFiles?.get(message.fileId) ?? await this.driveFileEntityService.pack(message.file ?? message.fileId)) : null,
+			drawingId: message.drawingId,
+			drawing: message.drawingId ? await this.packDrawingLite(message.drawing ?? message.drawingId) : null,
 			reactions: reactions.filter((r): r is { user: Packed<'UserLite'>; reaction: string; } => r.user != null),
 		};
 	}
@@ -152,6 +215,8 @@ export class ChatEntityService {
 			toUserId: message.toUserId!,
 			fileId: message.fileId,
 			file: message.fileId ? (packedFiles?.get(message.fileId) ?? await this.driveFileEntityService.pack(message.file ?? message.fileId)) : null,
+			drawingId: message.drawingId,
+			drawing: message.drawingId ? await this.packDrawingLite(message.drawing ?? message.drawingId) : null,
 			reactions,
 		};
 	}
@@ -205,6 +270,8 @@ export class ChatEntityService {
 			toRoomId: message.toRoomId!,
 			fileId: message.fileId,
 			file: message.fileId ? (packedFiles?.get(message.fileId) ?? await this.driveFileEntityService.pack(message.file ?? message.fileId)) : null,
+			drawingId: message.drawingId,
+			drawing: message.drawingId ? await this.packDrawingLite(message.drawing ?? message.drawingId) : null,
 			reactions: reactions.filter((r): r is { user: Packed<'UserLite'>; reaction: string; } => r.user != null),
 		};
 	}

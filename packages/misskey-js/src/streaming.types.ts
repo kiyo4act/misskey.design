@@ -259,10 +259,49 @@ export type Channels = {
 				user?: UserLite;
 				messageId: ChatMessageLite['id'];
 			}) => void;
+			drawStroke: (payload: {
+				userId: User['id'];
+				drawingId: string;
+				stroke: ChatDrawStroke;
+			}) => void;
+			drawClear: (payload: {
+				userId: User['id'];
+				drawingId: string;
+			}) => void;
+			drawingUpdated: (payload: {
+				drawingId: string;
+				imageAccessKey: string;
+				updatedAt: string;
+				lastEditedById: User['id'];
+			}) => void;
+			drawingPresence: (payload: {
+				drawingId: string;
+				userId: User['id'];
+				user: UserLite;
+			}) => void;
+			drawUndo: (payload: {
+				userId: User['id'];
+				drawingId: string;
+				strokeId: string;
+			}) => void;
 		};
 		receives: {
 			read: {
 				id: ChatMessageLite['id'];
+			};
+			drawStroke: {
+				drawingId: string;
+				stroke: ChatDrawStroke;
+			};
+			drawClear: {
+				drawingId: string;
+			};
+			drawingPresence: {
+				drawingId: string;
+			};
+			drawUndo: {
+				drawingId: string;
+				strokeId: string;
 			};
 		};
 	};
@@ -283,13 +322,61 @@ export type Channels = {
 				user?: UserLite;
 				messageId: ChatMessageLite['id'];
 			}) => void;
+			drawStroke: (payload: {
+				userId: User['id'];
+				drawingId: string;
+				stroke: ChatDrawStroke;
+			}) => void;
+			drawClear: (payload: {
+				userId: User['id'];
+				drawingId: string;
+			}) => void;
+			drawingUpdated: (payload: {
+				drawingId: string;
+				imageAccessKey: string;
+				updatedAt: string;
+				lastEditedById: User['id'];
+			}) => void;
+			drawingPresence: (payload: {
+				drawingId: string;
+				userId: User['id'];
+				user: UserLite;
+			}) => void;
+			drawUndo: (payload: {
+				userId: User['id'];
+				drawingId: string;
+				strokeId: string;
+			}) => void;
 		};
 		receives: {
 			read: {
 				id: ChatMessageLite['id'];
 			};
+			drawStroke: {
+				drawingId: string;
+				stroke: ChatDrawStroke;
+			};
+			drawClear: {
+				drawingId: string;
+			};
+			drawingPresence: {
+				drawingId: string;
+			};
+			drawUndo: {
+				drawingId: string;
+				strokeId: string;
+			};
 		};
 	};
+};
+
+export type ChatDrawStroke = {
+	id?: string;
+	points: number[][];
+	color: string;
+	width: number;
+	tool: 'pen' | 'eraser' | 'fill' | 'paint';
+	layer?: 'main' | 'draft';
 };
 
 export type NoteUpdatedEvent = { id: Note['id'] } & ({

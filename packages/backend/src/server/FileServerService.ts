@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import type { Config } from '@/config.js';
-import type { DriveFilesRepository } from '@/models/_.js';
+import type { ChatDrawingsRepository, DriveFilesRepository } from '@/models/_.js';
 import { DI } from '@/di-symbols.js';
 import { StatusError } from '@/misc/status-error.js';
 import type Logger from '@/logger.js';
@@ -43,6 +43,9 @@ export class FileServerService {
 
 		@Inject(DI.driveFilesRepository)
 		private driveFilesRepository: DriveFilesRepository,
+
+		@Inject(DI.chatDrawingsRepository)
+		private chatDrawingsRepository: ChatDrawingsRepository,
 
 		private fileInfoService: FileInfoService,
 		private downloadService: DownloadService,
@@ -99,6 +102,24 @@ export class FileServerService {
 			});
 			fastify.get<{ Params: { key: string; } }>('/files/:key/*', async (request, reply) => {
 				return await reply.redirect(`${this.config.url}/files/${request.params.key}`, 301);
+			});
+
+			fastify.get<{ Params: { key: string; } }>('/chat-drawings/:key', async (request, reply) => {
+				const keyParam = request.params.key;
+				const accessKey = keyParam.endsWith('.png') ? keyParam.slice(0, -4) : keyParam;
+				const drawing = await this.chatDrawingsRepository.findOneBy({ imageAccessKey: accessKey });
+				if (drawing == null || drawing.imageAccessKey == null) {
+					reply.code(404);
+					return reply.send('Not found');
+				}
+				try {
+					const stream = this.internalStorageService.read(`chatdrawing-${drawing.imageAccessKey}.png`);
+					reply.header('Content-Type', 'image/png');
+					reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+					return reply.send(stream);
+				} catch (err) {
+					return this.errorHandler(request, reply, err);
+				}
 			});
 			done();
 		});

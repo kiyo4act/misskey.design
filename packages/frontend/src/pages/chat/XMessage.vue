@@ -6,9 +6,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 <template>
 <div :class="[$style.root, { [$style.isMe]: isMe }]">
 	<MkAvatar :class="[$style.avatar, prefer.s.useStickyIcons ? $style.useSticky : null]" :user="message.fromUser!" :link="!isMe" :preview="false"/>
-	<div :class="[$style.body, message.file != null ? $style.fullWidth : null]" @contextmenu.stop="onContextmenu">
+	<div :class="[$style.body, (message.file != null || drawing != null) ? $style.fullWidth : null]" @contextmenu.stop="onContextmenu">
 		<div :class="$style.header"><MkUserName v-if="!isMe && prefer.s['chat.showSenderName'] && message.fromUser != null" :user="message.fromUser"/></div>
-		<MkFukidashi :class="$style.fukidashi" :tail="isMe ? 'right' : 'left'" :fullWidth="message.file != null" :accented="isMe">
+		<MkFukidashi :class="$style.fukidashi" :tail="isMe ? 'right' : 'left'" :fullWidth="message.file != null || drawing != null" :accented="isMe">
 			<Mfm
 				v-if="message.text"
 				ref="text"
@@ -20,6 +20,11 @@ SPDX-License-Identifier: AGPL-3.0-only
 				:enableEmojiMenuReaction="true"
 			/>
 			<MkMediaList v-if="message.file" :mediaList="[message.file]"/>
+			<div v-if="drawing" :class="$style.drawing">
+				<div v-if="drawing.title" :class="$style.drawingTitle"><i class="ti ti-brush"></i> {{ drawing.title }}</div>
+				<img :src="drawing.imageUrl ?? ''" :class="$style.drawingImage" alt="drawing"/>
+				<button class="_button" :class="$style.resumeButton" @click="resumeDrawing"><i class="ti ti-edit"></i> 続きから描く</button>
+			</div>
 		</MkFukidashi>
 		<MkUrlPreview v-for="url in urls" :key="url" :url="url" style="margin: 8px 0;"/>
 		<div :class="$style.footer">
@@ -51,7 +56,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { computed, defineAsyncComponent, provide } from 'vue';
+import { computed, defineAsyncComponent, inject, provide } from 'vue';
 import * as mfm from 'mfm-js';
 import * as Misskey from 'misskey-js';
 import { url } from '@@/js/config.js';
@@ -83,6 +88,30 @@ const props = defineProps<{
 
 const isMe = computed(() => props.message.fromUserId === $i.id);
 const urls = computed(() => props.message.text ? extractUrlFromMfm(mfm.parse(props.message.text)) : []);
+
+const drawing = computed(() => props.message.drawing ?? null);
+const chatConnection = inject(DI.chatConnection, null);
+const chatTarget = inject(DI.chatTarget, null);
+
+function resumeDrawing() {
+	const d = drawing.value;
+	if (!d) return;
+	const conn = chatConnection?.value;
+	if (!conn) return;
+	const target = chatTarget?.value ?? { roomId: null, otherUserId: null };
+	const { dispose } = os.popup(
+		defineAsyncComponent(() => import('./drawing-canvas.vue')),
+		{
+			connection: conn,
+			roomId: target.roomId,
+			otherUserId: target.otherUserId,
+			drawingId: d.id,
+		},
+		{
+			closed: () => dispose(),
+		},
+	);
+}
 
 provide(DI.mfmEmojiReactCallback, (reaction) => {
 	if ($i.policies.chatAvailability !== 'available') return;
@@ -214,6 +243,44 @@ function showMenu(ev: PointerEvent, contextmenu = false) {
 }
 .transition_reaction_leaveActive {
 	position: absolute;
+}
+
+.drawing {
+	margin-top: 8px;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 6px;
+}
+
+.drawingTitle {
+	font-weight: bold;
+	font-size: 0.95em;
+	color: var(--MI_THEME-accent);
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.drawingImage {
+	max-width: 100%;
+	max-height: 400px;
+	border-radius: 8px;
+	background: #fff;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.resumeButton {
+	font-size: 0.85em;
+	padding: 4px 10px;
+	border-radius: 999px;
+	background: var(--MI_THEME-accentedBg);
+	color: var(--MI_THEME-accent);
+
+	&:hover {
+		background: var(--MI_THEME-accent);
+		color: #fff;
+	}
 }
 
 .root {

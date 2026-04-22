@@ -1347,6 +1347,33 @@ export type paths = {
          */
         post: operations['charts___users'];
     };
+    '/chat/drawings/create': {
+        /**
+         * chat/drawings/create
+         * @description No description provided.
+         *
+         *     **Credential required**: *Yes* / **Permission**: *write:chat*
+         */
+        post: operations['chat___drawings___create'];
+    };
+    '/chat/drawings/show': {
+        /**
+         * chat/drawings/show
+         * @description No description provided.
+         *
+         *     **Credential required**: *Yes* / **Permission**: *read:chat*
+         */
+        post: operations['chat___drawings___show'];
+    };
+    '/chat/drawings/update': {
+        /**
+         * chat/drawings/update
+         * @description No description provided.
+         *
+         *     **Credential required**: *Yes* / **Permission**: *write:chat*
+         */
+        post: operations['chat___drawings___update'];
+    };
     '/chat/history': {
         /**
          * chat/history
@@ -5599,6 +5626,8 @@ export type components = {
             text?: string | null;
             fileId?: string | null;
             file?: components['schemas']['DriveFile'] | null;
+            drawingId?: string | null;
+            drawing?: components['schemas']['ChatDrawingLite'] | null;
             isRead?: boolean;
             reactions: {
                 reaction: string;
@@ -5616,6 +5645,8 @@ export type components = {
             text?: string | null;
             fileId?: string | null;
             file?: components['schemas']['DriveFile'] | null;
+            drawingId?: string | null;
+            drawing?: components['schemas']['ChatDrawingLite'] | null;
             reactions: {
                 reaction: string;
                 user?: components['schemas']['UserLite'] | null;
@@ -5630,6 +5661,8 @@ export type components = {
             text?: string | null;
             fileId?: string | null;
             file?: components['schemas']['DriveFile'] | null;
+            drawingId?: string | null;
+            drawing?: components['schemas']['ChatDrawingLite'] | null;
             reactions: {
                 reaction: string;
             }[];
@@ -5644,6 +5677,8 @@ export type components = {
             text?: string | null;
             fileId?: string | null;
             file?: components['schemas']['DriveFile'] | null;
+            drawingId?: string | null;
+            drawing?: components['schemas']['ChatDrawingLite'] | null;
             reactions: {
                 reaction: string;
                 user: components['schemas']['UserLite'];
@@ -5677,6 +5712,39 @@ export type components = {
             user?: components['schemas']['UserLite'];
             roomId: string;
             room?: components['schemas']['ChatRoom'];
+        };
+        ChatDrawing: {
+            id: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            createdById: string;
+            lastEditedById: string;
+            roomId: string | null;
+            otherUserId: string | null;
+            title: string;
+            width: number;
+            height: number;
+            imageUrl: string | null;
+            strokes: {
+                points: number[][];
+                color: string;
+                width: number;
+                tool: string;
+            }[];
+        };
+        ChatDrawingLite: {
+            id: string;
+            /** Format: date-time */
+            updatedAt: string;
+            createdById: string;
+            lastEditedById: string;
+            roomId: string | null;
+            title: string;
+            width: number;
+            height: number;
+            imageUrl: string | null;
         };
     };
     responses: never;
@@ -16609,6 +16677,228 @@ export interface operations {
             };
         };
     };
+    chat___drawings___create: {
+        requestBody: {
+            content: {
+                'application/json': {
+                    /** Format: misskey:id */
+                    roomId?: string | null;
+                    /** Format: misskey:id */
+                    otherUserId?: string | null;
+                    title: string;
+                    /** @default [] */
+                    strokes?: Record<string, never>[];
+                };
+            };
+        };
+        responses: {
+            /** @description OK (with results) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ChatDrawing'];
+                };
+            };
+            /** @description Client error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Authentication error */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Forbidden error */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description I'm Ai */
+            418: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+        };
+    };
+    chat___drawings___show: {
+        requestBody: {
+            content: {
+                'application/json': {
+                    /** Format: misskey:id */
+                    drawingId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK (with results) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ChatDrawing'];
+                };
+            };
+            /** @description Client error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Authentication error */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Forbidden error */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description I'm Ai */
+            418: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+        };
+    };
+    chat___drawings___update: {
+        requestBody: {
+            content: {
+                'application/json': {
+                    /** Format: misskey:id */
+                    drawingId: string;
+                    strokes: Record<string, never>[];
+                };
+            };
+        };
+        responses: {
+            /** @description OK (with results) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ChatDrawing'];
+                };
+            };
+            /** @description Client error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Authentication error */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Forbidden error */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description I'm Ai */
+            418: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['Error'];
+                };
+            };
+        };
+    };
     chat___history: {
         requestBody: {
             content: {
@@ -16684,6 +16974,8 @@ export interface operations {
                     text?: string | null;
                     /** Format: misskey:id */
                     fileId?: string;
+                    /** Format: misskey:id */
+                    drawingId?: string;
                     /** Format: misskey:id */
                     toRoomId: string;
                 };
@@ -16762,6 +17054,8 @@ export interface operations {
                     text?: string | null;
                     /** Format: misskey:id */
                     fileId?: string;
+                    /** Format: misskey:id */
+                    drawingId?: string;
                     /** Format: misskey:id */
                     toUserId: string;
                 };
@@ -18602,7 +18896,7 @@ export interface operations {
         requestBody: {
             content: {
                 'application/json': {
-                    /** @default 10 */
+                    /** @default 100 */
                     limit?: number;
                     /** Format: misskey:id */
                     sinceId?: string;

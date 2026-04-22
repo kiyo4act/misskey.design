@@ -80,7 +80,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 						</button>
 					</div>
 				</Transition>
-				<XForm v-if="initialized" :user="user" :room="room" :class="$style.form"/>
+				<XForm v-if="initialized" :user="user" :room="room" :connection="connection" :class="$style.form"/>
 			</div>
 		</div>
 	</template>
@@ -88,8 +88,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { ref, useTemplateRef, computed, onMounted, onBeforeUnmount, onDeactivated, onActivated } from 'vue';
+import { ref, useTemplateRef, computed, onMounted, onBeforeUnmount, onDeactivated, onActivated, provide } from 'vue';
 import * as Misskey from 'misskey-js';
+import { DI } from '@/di.js';
 import { getScrollContainer } from '@@/js/scroll.js';
 import XMessage from './XMessage.vue';
 import XForm from './room.form.vue';
@@ -136,6 +137,12 @@ const user = ref<Misskey.entities.UserDetailed | null>(null);
 const room = ref<Misskey.entities.ChatRoom | null>(null);
 const connection = ref<Misskey.IChannelConnection<Misskey.Channels['chatUser']> | Misskey.IChannelConnection<Misskey.Channels['chatRoom']> | null>(null);
 const showIndicator = ref(false);
+
+provide(DI.chatConnection, connection);
+provide(DI.chatTarget, computed(() => ({
+	roomId: room.value?.id ?? null,
+	otherUserId: user.value?.id ?? null,
+})));
 const timelineEl = useTemplateRef('timelineEl');
 const timeline = makeDateSeparatedTimelineComputedRef(messages);
 
@@ -197,6 +204,7 @@ async function initialize() {
 		connection.value.on('deleted', onDeleted);
 		connection.value.on('react', onReact);
 		connection.value.on('unreact', onUnreact);
+		connection.value.on('drawingUpdated', onDrawingUpdated);
 	} else if (props.roomId) {
 		const [rResult, mResult] = await Promise.allSettled([
 			misskeyApi('chat/rooms/show', { roomId: props.roomId }),
@@ -248,6 +256,7 @@ async function initialize() {
 		connection.value.on('deleted', onDeleted);
 		connection.value.on('react', onReact);
 		connection.value.on('unreact', onUnreact);
+		connection.value.on('drawingUpdated', onDrawingUpdated);
 	}
 
 	window.document.addEventListener('visibilitychange', onVisibilitychange);
@@ -324,6 +333,17 @@ function onReact(ctx: Parameters<Misskey.Channels['chatUser']['events']['react']
 				reaction: ctx.reaction,
 				user: ctx.user!,
 			});
+		}
+	}
+}
+
+function onDrawingUpdated(payload: { drawingId: string; imageAccessKey: string; updatedAt: string; lastEditedById: string }) {
+	const imageUrl = `${window.location.origin}/chat-drawings/${payload.imageAccessKey}.png`;
+	for (const m of messages.value) {
+		if (m.drawing && m.drawing.id === payload.drawingId) {
+			m.drawing.imageUrl = imageUrl;
+			m.drawing.updatedAt = payload.updatedAt;
+			m.drawing.lastEditedById = payload.lastEditedById;
 		}
 	}
 }
