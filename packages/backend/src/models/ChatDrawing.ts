@@ -19,6 +19,10 @@ export type ChatDrawingStroke = {
 	// 'main' (default) or 'draft'. Draft strokes are rendered semi-transparently underneath
 	// the main layer so they serve as an underlay sketch.
 	layer?: 'main' | 'draft' | 'lineart';
+	// When true, the stroke is drawn with `source-atop` so it only lands where the target
+	// layer already has pixels. Used for "lineart clipping" — recoloring existing lines
+	// rather than painting new pixels next to them.
+	clip?: boolean;
 };
 
 @Entity('chat_drawing')

@@ -13,6 +13,7 @@ export type ChatDrawingStroke = {
 	width: number;
 	tool: 'pen' | 'eraser' | 'fill' | 'paint';
 	layer?: 'main' | 'draft' | 'lineart';
+	clip?: boolean;
 };
 
 export type ChatDrawingLite = Misskey.entities.ChatDrawingLite;

@@ -14,6 +14,7 @@ export type SanitizedDrawStroke = {
 	width: number;
 	tool: 'pen' | 'eraser' | 'fill' | 'paint';
 	layer?: 'main' | 'draft' | 'lineart';
+	clip?: boolean;
 };
 
 export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
@@ -60,6 +61,7 @@ export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
 		raw.layer === 'draft' ? 'draft' :
 		raw.layer === 'lineart' ? 'lineart' :
 		'main';
+	const clip = raw.clip === true ? true : undefined;
 
-	return { id, points, color, width, tool, layer };
+	return { id, points, color, width, tool, layer, clip };
 }

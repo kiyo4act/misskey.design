@@ -48,6 +48,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<span :class="$style.layerToggleLabel">{{ currentLayerLabel }}</span>
 			</button>
 
+			<button
+				class="_button"
+				:class="[$style.toolButton, lineartClipEnabled ? $style.toolActive : null]"
+				title="線画クリップ: ペン/厚塗り/直線を線画レイヤーの既存ピクセルのみに重ねる"
+				@click="lineartClipEnabled = !lineartClipEnabled"
+			>
+				<i class="ti ti-link"></i>
+			</button>
+
 
 			<div :class="$style.spacer"></div>
 
@@ -83,10 +92,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 			<div :class="$style.separator"></div>
 
-			<label :class="$style.sliderField" title="太さ">
-				<i class="ti ti-line-height" :class="$style.sliderIcon"></i>
-				<input v-model.number="width" type="range" min="1" max="60" step="1" :class="$style.widthSlider"/>
-				<span :class="$style.widthValue">{{ width }}</span>
+			<label :class="$style.sliderField" :title="tool === 'eraser' ? '消しゴムの太さ' : '太さ'">
+				<i :class="[$style.sliderIcon, tool === 'eraser' ? 'ti ti-eraser' : 'ti ti-line-height']"></i>
+				<input v-model.number="activeBrushWidth" type="range" min="1" max="60" step="1" :class="$style.widthSlider"/>
+				<span :class="$style.widthValue">{{ activeBrushWidth }}</span>
 			</label>
 
 			<label :class="$style.sliderField" title="不透明度" :style="tool === 'eraser' ? 'opacity: 0.4;' : ''">
@@ -163,6 +172,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 						@pointerenter="onCanvasPointerEnter"
 						@pointerleave="onCanvasPointerLeave"
 						@pointercancel="onPointerUp"
+						@selectstart.prevent
+						@dragstart.prevent
 					></canvas>
 				</div>
 			</div>
@@ -289,6 +300,32 @@ let bakedCount = 0;
 const UNDO_WINDOW = 10;
 const color = ref<string>('#222222');
 const width = ref<number>(6);
+// Eraser has its own width so switching between pen and eraser doesn't require resizing.
+const eraserWidth = ref<number>(20);
+// "Lineart clip" mode — when on, pen/paint/line strokes go to the lineart layer with
+// `source-atop`, so they only recolor existing line pixels rather than painting new ones.
+const lineartClipEnabled = ref<boolean>(false);
+
+// Active brush width per tool. The toolbar "太さ" slider binds to this so each tool
+// keeps its own last-set size.
+const activeBrushWidth = computed<number>({
+	get: () => tool.value === 'eraser' ? eraserWidth.value : width.value,
+	set: (v: number) => {
+		if (tool.value === 'eraser') eraserWidth.value = v;
+		else width.value = v;
+	},
+});
+
+// Which layer the next stroke lands on, honouring the lineart-clip override. Only pen/
+// paint/line make sense to clip; other tools ignore the flag.
+function effectiveLayerForNewStroke(): 'main' | 'draft' | 'lineart' {
+	if (lineartClipEnabled.value && (tool.value === 'pen' || tool.value === 'paint' || tool.value === 'line')) return 'lineart';
+	return currentLayer.value;
+}
+
+function effectiveClipForNewStroke(): boolean {
+	return lineartClipEnabled.value && (tool.value === 'pen' || tool.value === 'paint' || tool.value === 'line');
+}
 const saving = ref(false);
 const loading = ref(true);
 const title = ref<string>('');
@@ -1219,6 +1256,10 @@ function renderStrokeToCtx(
 		c.globalCompositeOperation = 'destination-out';
 		c.strokeStyle = '#000';
 		c.globalAlpha = 1;
+	} else if (stroke.clip) {
+		// Lineart clip: paint only where the target already has pixels (source-atop).
+		c.globalCompositeOperation = 'source-atop';
+		c.strokeStyle = stroke.color;
 	} else {
 		c.strokeStyle = stroke.color;
 	}
@@ -1357,7 +1398,7 @@ function updateBrushCursor(ev: PointerEvent) {
 	const canvasRect = canvasEl.value.getBoundingClientRect();
 	const areaRect = canvasAreaEl.value.getBoundingClientRect();
 	const displayScale = canvasRect.width / CANVAS_W;
-	const size = Math.max(4, width.value * displayScale);
+	const size = Math.max(4, activeBrushWidth.value * displayScale);
 	// Cursor lives in canvasArea (non-scrolling), so viewport delta is all we need.
 	cursorStyle.value = {
 		left: (ev.clientX - areaRect.left) + 'px',
@@ -1464,7 +1505,8 @@ function onPointerDown(ev: PointerEvent) {
 	activePointerId = ev.pointerId;
 	// Snapshot the target layer before the first pixel is touched so undo can restore it
 	// with one putImageData on the stroke's bbox at commit time.
-	grabPreStrokeSnapshot(currentLayer.value);
+	const layerForStroke = effectiveLayerForNewStroke();
+	grabPreStrokeSnapshot(layerForStroke);
 
 	if (tool.value === 'line') {
 		lineStart = point;
@@ -1479,15 +1521,17 @@ function onPointerDown(ev: PointerEvent) {
 	renderStroke({
 		points: [point],
 		color: composedColor.value,
-		width: width.value / CANVAS_W,
+		width: activeBrushWidth.value / CANVAS_W,
 		tool: tool.value,
-		layer: currentLayer.value,
+		layer: layerForStroke,
+		...(effectiveClipForNewStroke() ? { clip: true } : {}),
 	});
 }
 
 function drawLinePreview(start: [number, number, number], end: [number, number, number]) {
 	if (!preStrokeLayerSnapshot) return;
-	const c = getLayerCtx(currentLayer.value);
+	// Target the same layer we snapshotted (honours lineart-clip routing from onPointerDown).
+	const c = getLayerCtx(preStrokeLayerTarget ?? currentLayer.value);
 	c.putImageData(preStrokeLayerSnapshot, 0, 0);
 	c.save();
 	c.lineCap = 'round';
@@ -1496,11 +1540,15 @@ function drawLinePreview(start: [number, number, number], end: [number, number, 
 		c.globalCompositeOperation = 'destination-out';
 		c.strokeStyle = '#000';
 		c.globalAlpha = 1;
+	} else if (effectiveClipForNewStroke()) {
+		c.globalCompositeOperation = 'source-atop';
+		c.strokeStyle = composedColor.value;
+		c.globalAlpha = 1;
 	} else {
 		c.strokeStyle = composedColor.value;
 		c.globalAlpha = 1;
 	}
-	c.lineWidth = Math.max(0.5, width.value);
+	c.lineWidth = Math.max(0.5, activeBrushWidth.value);
 	c.beginPath();
 	c.moveTo(start[0] * CANVAS_W, start[1] * CANVAS_H);
 	c.lineTo(end[0] * CANVAS_W, end[1] * CANVAS_H);
@@ -1539,7 +1587,7 @@ function onPointerMove(ev: PointerEvent) {
 	if (dx * dx + dy * dy < 1) return;
 
 	const avgP = (last[2] + next[2]) / 2;
-	const c = getLayerCtx(currentLayer.value);
+	const c = getLayerCtx(preStrokeLayerTarget ?? currentLayer.value);
 	c.save();
 	c.lineCap = 'round';
 	c.lineJoin = 'round';
@@ -1547,11 +1595,15 @@ function onPointerMove(ev: PointerEvent) {
 		c.globalCompositeOperation = 'destination-out';
 		c.strokeStyle = '#000';
 		c.globalAlpha = 1;
+	} else if (effectiveClipForNewStroke()) {
+		c.globalCompositeOperation = 'source-atop';
+		c.strokeStyle = composedColor.value;
+		c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
 	} else {
 		c.strokeStyle = composedColor.value;
 		c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
 	}
-	c.lineWidth = Math.max(0.5, width.value * avgP);
+	c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 	c.beginPath();
 	c.moveTo(last[0] * CANVAS_W, last[1] * CANVAS_H);
 	c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
@@ -1581,8 +1633,10 @@ function onPointerUp(ev: PointerEvent) {
 			finalEnd = [lineStart[0] + Math.cos(snapped) * dist, lineStart[1] + Math.sin(snapped) * dist, end[2]];
 		}
 		// Restore snapshot then commit through the normal stroke path so remote peers render identically.
+		const lineLayer = preStrokeLayerTarget ?? currentLayer.value;
+		const lineClip = effectiveClipForNewStroke();
 		if (preStrokeLayerSnapshot) {
-			const c = getLayerCtx(currentLayer.value);
+			const c = getLayerCtx(lineLayer);
 			c.putImageData(preStrokeLayerSnapshot, 0, 0);
 			recompositeDisplay();
 		}
@@ -1593,9 +1647,10 @@ function onPointerUp(ev: PointerEvent) {
 				[finalEnd[0], finalEnd[1], 1],
 			],
 			color: composedColor.value,
-			width: width.value / CANVAS_W,
+			width: activeBrushWidth.value / CANVAS_W,
 			tool: 'pen', // line is committed as a 2-point pen stroke
-			layer: currentLayer.value,
+			layer: lineLayer,
+			...(lineClip ? { clip: true } : {}),
 		};
 		strokes.value.push(stroke);
 		renderStroke(stroke);
@@ -1618,7 +1673,7 @@ function onPointerUp(ev: PointerEvent) {
 		const dy = (next[1] - last[1]) * CANVAS_H;
 		if (dx * dx + dy * dy < 1) continue;
 		const avgP = (last[2] + next[2]) / 2;
-		const c = getLayerCtx(currentLayer.value);
+		const c = getLayerCtx(preStrokeLayerTarget ?? currentLayer.value);
 		c.save();
 		c.lineCap = 'round';
 		c.lineJoin = 'round';
@@ -1626,11 +1681,15 @@ function onPointerUp(ev: PointerEvent) {
 			c.globalCompositeOperation = 'destination-out';
 			c.strokeStyle = '#000';
 			c.globalAlpha = 1;
+		} else if (effectiveClipForNewStroke()) {
+			c.globalCompositeOperation = 'source-atop';
+			c.strokeStyle = composedColor.value;
+			c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
 		} else {
 			c.strokeStyle = composedColor.value;
 			c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
 		}
-		c.lineWidth = Math.max(0.5, width.value * avgP);
+		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 		c.beginPath();
 		c.moveTo(last[0] * CANVAS_W, last[1] * CANVAS_H);
 		c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
@@ -1649,13 +1708,16 @@ function onPointerUp(ev: PointerEvent) {
 		tool.value === 'eraser' ? 'eraser' :
 		tool.value === 'paint' ? 'paint' :
 		'pen';
+	const commitLayer = preStrokeLayerTarget ?? currentLayer.value;
+	const commitClip = effectiveClipForNewStroke() && commitTool !== 'eraser';
 	const stroke: ChatDrawingStroke = {
 		id: newStrokeId(),
 		points: currentPoints,
 		color: composedColor.value,
-		width: width.value / CANVAS_W,
+		width: activeBrushWidth.value / CANVAS_W,
 		tool: commitTool,
-		layer: currentLayer.value,
+		layer: commitLayer,
+		...(commitClip ? { clip: true } : {}),
 	};
 	currentPoints = [];
 
@@ -1946,6 +2008,20 @@ onBeforeUnmount(() => {
 	flex-direction: column;
 	height: 100%;
 	min-height: 0;
+	// Block iOS/iPadOS rubber-band selection, callout, and browser drag on the whole
+	// drawing surface. Text inputs inside (color hex field, etc.) re-enable selection
+	// locally.
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
+	-webkit-user-drag: none;
+}
+
+.root input[type="text"],
+.root input[type="number"] {
+	user-select: text;
+	-webkit-user-select: text;
 }
 
 .toolbar {
@@ -2174,6 +2250,12 @@ onBeforeUnmount(() => {
 	min-height: 0;
 	background: var(--MI_THEME-bg);
 	position: relative;
+	// Prevent iOS Safari (iPad) from triggering text-selection / callout / highlight on
+	// long press or drag over the canvas area.
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
 }
 
 .canvasScroll {
@@ -2249,6 +2331,11 @@ onBeforeUnmount(() => {
 	border-radius: 8px;
 	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
 	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
+	-webkit-user-drag: none;
 }
 
 .canvasBrushCursor {

@@ -181,6 +181,7 @@ export interface ChatEventTypes {
 			width: number;
 			tool: 'pen' | 'eraser' | 'fill' | 'paint';
 			layer?: 'main' | 'draft' | 'lineart';
+			clip?: boolean;
 		};
 	};
 	drawClear: {

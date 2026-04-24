@@ -82,8 +82,9 @@ function sanitizeStroke(input: unknown): ChatDrawingStroke | null {
 		raw.layer === 'draft' ? 'draft' :
 		raw.layer === 'lineart' ? 'lineart' :
 		'main';
+	const clip = raw.clip === true ? true : undefined;
 
-	return { id, points, color, width, tool, layer };
+	return { id, points, color, width, tool, layer, clip };
 }
 
 function hexToRgba(hex: string): [number, number, number, number] {
@@ -445,6 +446,13 @@ function renderOneStroke(
 			ctx.globalCompositeOperation = 'destination-out';
 			ctx.strokeStyle = '#000';
 			ctx.globalAlpha = 1;
+		} else if (stroke.clip) {
+			// Lineart clipping: only paint where the target layer already has pixels, so the
+			// stroke recolors the existing lineart (or main/draft) rather than painting new
+			// shapes next to it. Fill/eraser ignore this flag — it's only meaningful for
+			// pen/paint-style strokes.
+			ctx.globalCompositeOperation = 'source-atop';
+			ctx.strokeStyle = stroke.color;
 		} else {
 			ctx.strokeStyle = stroke.color;
 		}
