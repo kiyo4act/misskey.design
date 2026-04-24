@@ -5,7 +5,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { createCanvas } from '@napi-rs/canvas';
+import { createCanvas, type Canvas } from '@napi-rs/canvas';
 import * as Redis from 'ioredis';
 import { DI } from '@/di-symbols.js';
 import { bindThis } from '@/decorators.js';
@@ -16,6 +16,9 @@ import type { MiChatRoom } from '@/models/ChatRoom.js';
 import { IdService } from '@/core/IdService.js';
 import { InternalStorageService } from '@/core/InternalStorageService.js';
 import { GlobalEventService } from '@/core/GlobalEventService.js';
+import { S3Service } from '@/core/S3Service.js';
+import type { MiMeta } from '@/models/Meta.js';
+import type { Config } from '@/config.js';
 
 const MAX_STROKES = 4000;
 const MAX_POINTS_PER_STROKE = 2000;
@@ -75,7 +78,10 @@ function sanitizeStroke(input: unknown): ChatDrawingStroke | null {
 		'pen';
 
 	const id = typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(raw.id) ? raw.id : undefined;
-	const layer: 'main' | 'draft' = raw.layer === 'draft' ? 'draft' : 'main';
+	const layer: 'main' | 'draft' | 'lineart' =
+		raw.layer === 'draft' ? 'draft' :
+		raw.layer === 'lineart' ? 'lineart' :
+		'main';
 
 	return { id, points, color, width, tool, layer };
 }
@@ -95,17 +101,38 @@ function hexToRgba(hex: string): [number, number, number, number] {
 }
 
 // Tolerance + coverage blending + gap-tolerant propagation.
-//  - FLOOD_TOLERANCE: per-channel diff threshold separating "region" from "barrier"
+//  - FLOOD_RGB_TOLERANCE / FLOOD_ALPHA_TOLERANCE: per-channel diff thresholds separating
+//    "region" from "barrier". Alpha is gated tighter so thin pen-tablet pressure strokes
+//    (low-alpha anti-aliased cores) form a proper barrier and don't leak fill.
 //  - GAP_CLOSE_RADIUS: barriers are morphologically dilated by this radius, so small gaps
 //    in outlines (e.g. imperfect pen loops) don't leak. Propagation is blocked across
 //    any dilated barrier. Blending still uses the pixel's true distance to the seed,
 //    so anti-aliased edges of the outline stay smooth.
-const FLOOD_TOLERANCE = 80;
+// See the matching frontend comment for semantics. Split thresholds keep flood from
+// leaking through anti-aliased pen edges on transparent layers — especially thin pen-tablet
+// pressure strokes where alpha at the stroke core can be as low as ~15.
+const FLOOD_RGB_TOLERANCE = 140;
+const FLOOD_ALPHA_TOLERANCE = 16;
+const RIM_TOLERANCE = 230;
 const GAP_CLOSE_RADIUS = 3;
+// Fills live on a separate layer from the outline — we can safely overshoot into the
+// outline's anti-alias to eliminate the white halo without modifying the line layer.
+const FILL_DILATE_ITERATIONS = 2;
+
+// Reusable scratch Uint8Arrays for morphological / flood passes. Each fill previously
+// allocated ~6 × 786KB masks → 5MB GC churn per fill. Pooled module-wide; safe because
+// JS is single-threaded within a request and all usages are synchronous.
+const scratchPool: (Uint8Array | null)[] = [null, null, null, null, null];
+function getScratch(slot: number, n: number): Uint8Array {
+	let buf = scratchPool[slot];
+	if (!buf || buf.length < n) { buf = new Uint8Array(n); scratchPool[slot] = buf; }
+	else buf.fill(0);
+	return buf;
+}
 
 function dilateMask(mask: Uint8Array, w: number, h: number, radius: number): Uint8Array {
 	const n = w * h;
-	const temp = new Uint8Array(n);
+	const temp = getScratch(0, n);
 	for (let y = 0; y < h; y++) {
 		const rowOff = y * w;
 		for (let x = 0; x < w; x++) {
@@ -118,7 +145,8 @@ function dilateMask(mask: Uint8Array, w: number, h: number, radius: number): Uin
 			temp[rowOff + x] = any;
 		}
 	}
-	const result = new Uint8Array(n);
+	// Result writes into mask itself — callers either don't reuse the input or pass a
+	// throwaway buffer. Saves one more allocation per call.
 	for (let x = 0; x < w; x++) {
 		for (let y = 0; y < h; y++) {
 			let any = 0;
@@ -127,15 +155,15 @@ function dilateMask(mask: Uint8Array, w: number, h: number, radius: number): Uin
 			for (let yy = yMin; yy <= yMax; yy++) {
 				if (temp[yy * w + x]) { any = 1; break; }
 			}
-			result[y * w + x] = any;
+			mask[y * w + x] = any;
 		}
 	}
-	return result;
+	return mask;
 }
 
 function erodeMask(mask: Uint8Array, w: number, h: number, radius: number): Uint8Array {
 	const n = w * h;
-	const temp = new Uint8Array(n);
+	const temp = getScratch(0, n);
 	for (let y = 0; y < h; y++) {
 		const rowOff = y * w;
 		for (let x = 0; x < w; x++) {
@@ -148,7 +176,6 @@ function erodeMask(mask: Uint8Array, w: number, h: number, radius: number): Uint
 			temp[rowOff + x] = all;
 		}
 	}
-	const result = new Uint8Array(n);
 	for (let x = 0; x < w; x++) {
 		for (let y = 0; y < h; y++) {
 			let all = 1;
@@ -157,10 +184,10 @@ function erodeMask(mask: Uint8Array, w: number, h: number, radius: number): Uint
 			for (let yy = yMin; yy <= yMax; yy++) {
 				if (!temp[yy * w + x]) { all = 0; break; }
 			}
-			result[y * w + x] = all;
+			mask[y * w + x] = all;
 		}
 	}
-	return result;
+	return mask;
 }
 
 function buildClosedBarrier(data: Uint8ClampedArray, w: number, h: number, tR: number, tG: number, tB: number, tA: number, radius: number): Uint8Array {
@@ -168,39 +195,50 @@ function buildClosedBarrier(data: Uint8ClampedArray, w: number, h: number, tR: n
 	const barrier = new Uint8Array(n);
 	for (let i = 0; i < n; i++) {
 		const pos = i * 4;
-		const d = Math.max(
+		const rgbD = Math.max(
 			Math.abs(data[pos] - tR),
 			Math.abs(data[pos + 1] - tG),
 			Math.abs(data[pos + 2] - tB),
-			Math.abs(data[pos + 3] - tA),
 		);
-		if (d > FLOOD_TOLERANCE) barrier[i] = 1;
+		const alphaD = Math.abs(data[pos + 3] - tA);
+		if (rgbD > FLOOD_RGB_TOLERANCE || alphaD > FLOOD_ALPHA_TOLERANCE) barrier[i] = 1;
 	}
 	if (radius <= 0) return barrier;
 	const dilated = dilateMask(barrier, w, h, radius);
 	return erodeMask(dilated, w, h, radius);
 }
 
-function floodFill(data: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, fill: [number, number, number, number]): void {
+// `sample` is the composite used for seed + barrier detection (e.g. main+lineart for a
+// main-layer fill); `data` is the target layer the fill writes to. Pass `sample === data`
+// to fall back to single-layer fill.
+function floodFill(data: Uint8ClampedArray, sample: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, fill: [number, number, number, number]): void {
 	if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
 	const startPos = (sy * w + sx) * 4;
-	const tR = data[startPos], tG = data[startPos + 1], tB = data[startPos + 2], tA = data[startPos + 3];
+	const tR = sample[startPos], tG = sample[startPos + 1], tB = sample[startPos + 2], tA = sample[startPos + 3];
 	const [fR, fG, fB, fA] = fill;
-	if (tR === fR && tG === fG && tB === fB && tA === fA) return;
+	if (sample === data && tR === fR && tG === fG && tB === fB && tA === fA) return;
 
-	const barrier = buildClosedBarrier(data, w, h, tR, tG, tB, tA, GAP_CLOSE_RADIUS);
+	const barrier = buildClosedBarrier(sample, w, h, tR, tG, tB, tA, GAP_CLOSE_RADIUS);
 	barrier[sy * w + sx] = 0;
 
-	const visited = new Uint8Array(w * h);
-	const diff = (pos: number) => Math.max(
-		Math.abs(data[pos] - tR),
-		Math.abs(data[pos + 1] - tG),
-		Math.abs(data[pos + 2] - tB),
-		Math.abs(data[pos + 3] - tA),
+	const visited = getScratch(1, w * h);
+	const sampleDiff = (pos: number) => Math.max(
+		Math.abs(sample[pos] - tR),
+		Math.abs(sample[pos + 1] - tG),
+		Math.abs(sample[pos + 2] - tB),
+		Math.abs(sample[pos + 3] - tA),
 	);
+	// Full replace on the TARGET layer; rim softness comes from the post-pass below.
 	const blendAt = (pos: number) => {
-		const d = diff(pos);
-		const ratio = d === 0 ? 1 : Math.max(0, 1 - d / FLOOD_TOLERANCE);
+		data[pos] = fR;
+		data[pos + 1] = fG;
+		data[pos + 2] = fB;
+		data[pos + 3] = fA;
+	};
+	const rimBlendAt = (pos: number) => {
+		const d = sampleDiff(pos);
+		if (d >= RIM_TOLERANCE) return;
+		const ratio = Math.max(0, 1 - d / RIM_TOLERANCE);
 		data[pos] = Math.round(data[pos] + (fR - data[pos]) * ratio);
 		data[pos + 1] = Math.round(data[pos + 1] + (fG - data[pos + 1]) * ratio);
 		data[pos + 2] = Math.round(data[pos + 2] + (fB - data[pos + 2]) * ratio);
@@ -253,9 +291,19 @@ function floodFill(data: Uint8ClampedArray, w: number, h: number, sx: number, sy
 		const tryPush = (nIdx: number) => {
 			if (visited[nIdx]) return;
 			if (!barrier[nIdx]) return;
-			if (diff(nIdx * 4) > FLOOD_TOLERANCE) return;
+			const pos = nIdx * 4;
+			// Passability is judged against the SAMPLE composite (what the user sees),
+			// not the (often empty) target layer. Using `data` here caused Phase 2 to
+			// treat every barrier pixel as passable — the fill painted over the outline.
+			const rgbD = Math.max(
+				Math.abs(sample[pos] - tR),
+				Math.abs(sample[pos + 1] - tG),
+				Math.abs(sample[pos + 2] - tB),
+			);
+			const alphaD = Math.abs(sample[pos + 3] - tA);
+			if (rgbD > FLOOD_RGB_TOLERANCE || alphaD > FLOOD_ALPHA_TOLERANCE) return;
 			visited[nIdx] = 1;
-			blendAt(nIdx * 4);
+			blendAt(pos);
 			q.push(nIdx);
 		};
 		for (let idx = 0; idx < w * h; idx++) {
@@ -278,6 +326,66 @@ function floodFill(data: Uint8ClampedArray, w: number, h: number, sx: number, sy
 			if (y < h - 1) tryPush(idx + w);
 		}
 	}
+
+	// Dilation pass: overshoot fill into the outline's anti-alias zone so no white halo
+	// remains. Safe because the outline lives on a separate layer.
+	{
+		let frontier = getScratch(2, w * h);
+		let next = getScratch(3, w * h);
+		for (let idx = 0; idx < w * h; idx++) if (visited[idx]) frontier[idx] = 1;
+		for (let iter = 0; iter < FILL_DILATE_ITERATIONS; iter++) {
+			next.fill(0);
+			let grew = false;
+			for (let idx = 0; idx < w * h; idx++) {
+				if (!frontier[idx]) continue;
+				const y = (idx / w) | 0;
+				const x = idx - y * w;
+				const neighbors = [
+					x > 0 ? idx - 1 : -1,
+					x < w - 1 ? idx + 1 : -1,
+					y > 0 ? idx - w : -1,
+					y < h - 1 ? idx + w : -1,
+				];
+				for (const n of neighbors) {
+					if (n < 0 || visited[n]) continue;
+					if (!barrier[n]) continue;
+					if (sampleDiff(n * 4) >= RIM_TOLERANCE) continue;
+					const pos = n * 4;
+					data[pos] = fR;
+					data[pos + 1] = fG;
+					data[pos + 2] = fB;
+					data[pos + 3] = fA;
+					visited[n] = 1;
+					next[n] = 1;
+					grew = true;
+				}
+			}
+			if (!grew) break;
+			const swap = frontier; frontier = next; next = swap;
+		}
+	}
+
+	// Rim pass: soften any residual hairline where dilation stopped before the outline's true edge.
+	{
+		const rimProcessed = getScratch(4, w * h);
+		for (let idx = 0; idx < w * h; idx++) {
+			if (!visited[idx]) continue;
+			const y = (idx / w) | 0;
+			const x = idx - y * w;
+			const neighbors = [
+				x > 0 ? idx - 1 : -1,
+				x < w - 1 ? idx + 1 : -1,
+				y > 0 ? idx - w : -1,
+				y < h - 1 ? idx + w : -1,
+			];
+			for (const n of neighbors) {
+				if (n < 0) continue;
+				if (visited[n] || rimProcessed[n]) continue;
+				rimProcessed[n] = 1;
+				rimBlendAt(n * 4);
+			}
+		}
+	}
 }
 
 export function sanitizeStrokes(input: unknown): ChatDrawingStroke[] {
@@ -291,11 +399,14 @@ export function sanitizeStrokes(input: unknown): ChatDrawingStroke[] {
 	return out;
 }
 
-const DRAFT_LAYER_ALPHA = 0.4;
-
-function renderStrokesToLayerCtx(ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>, strokes: ChatDrawingStroke[], width: number, height: number): void {
-	for (const stroke of strokes) {
-		if (stroke.points.length === 0) continue;
+function renderOneStroke(
+	ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>,
+	stroke: ChatDrawingStroke,
+	width: number,
+	height: number,
+	layers?: { main: Canvas; draft: Canvas; lineart: Canvas; sample: Canvas },
+): void {
+		if (stroke.points.length === 0) return;
 
 		if (stroke.tool === 'fill') {
 			const [fx, fy] = stroke.points[0];
@@ -303,9 +414,27 @@ function renderStrokesToLayerCtx(ctx: ReturnType<ReturnType<typeof createCanvas>
 			const sy = Math.max(0, Math.min(height - 1, Math.floor(fy * height)));
 			const fillColor = hexToRgba(stroke.color);
 			const imageData = ctx.getImageData(0, 0, width, height);
-			floodFill(imageData.data, width, height, sx, sy, fillColor);
+			// Fills on main or lineart sample a composite of main + lineart so outlines on
+			// one layer block fills on the other. Fills on draft stay layer-local. The
+			// sample canvas is shared across the whole render pass to avoid per-fill
+			// allocation of a fresh 1024×768 buffer.
+			let sampleData: Uint8ClampedArray = imageData.data;
+			if (layers) {
+				const strokeLayer = stroke.layer === 'draft' ? 'draft' : stroke.layer === 'lineart' ? 'lineart' : 'main';
+				const sampleNames = strokeLayer === 'draft' ? (['draft'] as const) : (['main', 'lineart'] as const);
+				const sampleCtx = layers.sample.getContext('2d');
+				sampleCtx.save();
+				sampleCtx.setTransform(1, 0, 0, 1, 0, 0);
+				sampleCtx.globalCompositeOperation = 'source-over';
+				sampleCtx.globalAlpha = 1;
+				sampleCtx.clearRect(0, 0, width, height);
+				for (const n of sampleNames) sampleCtx.drawImage(layers[n], 0, 0);
+				sampleCtx.restore();
+				sampleData = sampleCtx.getImageData(0, 0, width, height).data;
+			}
+			floodFill(imageData.data, sampleData, width, height, sx, sy, fillColor);
 			ctx.putImageData(imageData, 0, 0);
-			continue;
+			return;
 		}
 
 		ctx.save();
@@ -348,31 +477,40 @@ function renderStrokesToLayerCtx(ctx: ReturnType<ReturnType<typeof createCanvas>
 			}
 		}
 		ctx.restore();
-	}
 }
 
 async function renderStrokesToPng(strokes: ChatDrawingStroke[], width: number, height: number): Promise<Buffer> {
-	// Render main and draft onto separate transparent buffers so main-layer erasers don't
-	// punch through draft, then composite onto a white canvas for the final PNG.
-	const mainLayer = createCanvas(width, height);
-	const draftLayer = createCanvas(width, height);
+	// Render main and lineart onto separate transparent buffers so per-layer erasers don't
+	// punch through each other, then composite in z-order onto a white canvas. Lineart
+	// sits ALWAYS on top of main (hence its name). The DRAFT layer is intentionally
+	// EXCLUDED from the published PNG — it's a sketch underlay kept in stored stroke data
+	// so authors can continue editing, but it shouldn't be visible in the chat thumbnail
+	// / final image. A fill on main may still sample the draft via the draw-time sample
+	// composite it received, but draft strokes themselves don't appear in the output.
+	const mainLayer: Canvas = createCanvas(width, height);
+	const draftLayer: Canvas = createCanvas(width, height);
+	const lineartLayer: Canvas = createCanvas(width, height);
+	// Shared sample buffer reused by every fill in this render pass.
+	const sampleLayer: Canvas = createCanvas(width, height);
 	const mainCtx = mainLayer.getContext('2d');
 	const draftCtx = draftLayer.getContext('2d');
+	const lineartCtx = lineartLayer.getContext('2d');
 
-	const draftStrokes = strokes.filter(s => s.layer === 'draft');
-	const mainStrokes = strokes.filter(s => s.layer !== 'draft');
-
-	renderStrokesToLayerCtx(draftCtx, draftStrokes, width, height);
-	renderStrokesToLayerCtx(mainCtx, mainStrokes, width, height);
+	const layerHandles = { main: mainLayer, draft: draftLayer, lineart: lineartLayer, sample: sampleLayer };
+	for (const stroke of strokes) {
+		const targetCtx =
+			stroke.layer === 'draft' ? draftCtx :
+			stroke.layer === 'lineart' ? lineartCtx :
+			mainCtx;
+		renderOneStroke(targetCtx, stroke, width, height, layerHandles);
+	}
 
 	const out = createCanvas(width, height);
 	const outCtx = out.getContext('2d');
 	outCtx.fillStyle = '#ffffff';
 	outCtx.fillRect(0, 0, width, height);
-	outCtx.globalAlpha = DRAFT_LAYER_ALPHA;
-	outCtx.drawImage(draftLayer, 0, 0);
-	outCtx.globalAlpha = 1;
 	outCtx.drawImage(mainLayer, 0, 0);
+	outCtx.drawImage(lineartLayer, 0, 0);
 
 	return out.encode('png');
 }
@@ -402,9 +540,16 @@ export class ChatDrawingService {
 		@Inject(DI.chatRoomMembershipsRepository)
 		private chatRoomMembershipsRepository: ChatRoomMembershipsRepository,
 
+		@Inject(DI.config)
+		private config: Config,
+
+		@Inject(DI.meta)
+		private meta: MiMeta,
+
 		private idService: IdService,
 		private internalStorageService: InternalStorageService,
 		private globalEventService: GlobalEventService,
+		private s3Service: S3Service,
 	) {
 	}
 
@@ -503,7 +648,7 @@ export class ChatDrawingService {
 		const now = new Date();
 		const accessKey = randomBytes(24).toString('hex');
 		const png = await renderStrokesToPng(cleanStrokes, DEFAULT_WIDTH, DEFAULT_HEIGHT);
-		this.internalStorageService.saveFromBuffer(drawingStorageKey(accessKey), png);
+		await this.storeDrawingPng(accessKey, png);
 
 		const drawing = {
 			id: this.idService.gen(now.getTime()),
@@ -538,7 +683,7 @@ export class ChatDrawingService {
 		const now = new Date();
 		const accessKey = randomBytes(24).toString('hex');
 		const png = await renderStrokesToPng(cleanStrokes, DEFAULT_WIDTH, DEFAULT_HEIGHT);
-		this.internalStorageService.saveFromBuffer(drawingStorageKey(accessKey), png);
+		await this.storeDrawingPng(accessKey, png);
 
 		const drawing = {
 			id: this.idService.gen(now.getTime()),
@@ -565,13 +710,18 @@ export class ChatDrawingService {
 		editor: MiUser,
 		drawing: MiChatDrawing,
 		strokes: unknown,
+		preBakedPng?: Buffer | null,
 	): Promise<MiChatDrawing> {
 		const cleanStrokes = sanitizeStrokes(strokes);
-		const png = await renderStrokesToPng(cleanStrokes, drawing.width || DEFAULT_WIDTH, drawing.height || DEFAULT_HEIGHT);
+		// Prefer the client-baked composite — it's already composited correctly and saves
+		// the heavy stroke replay. The caller validated PNG magic + size before passing.
+		const png = preBakedPng && preBakedPng.length > 0
+			? preBakedPng
+			: await renderStrokesToPng(cleanStrokes, drawing.width || DEFAULT_WIDTH, drawing.height || DEFAULT_HEIGHT);
 
 		// rotate access key so stale CDN/browser caches don't serve old image
 		const newAccessKey = randomBytes(24).toString('hex');
-		this.internalStorageService.saveFromBuffer(drawingStorageKey(newAccessKey), png);
+		await this.storeDrawingPng(newAccessKey, png);
 
 		const oldAccessKey = drawing.imageAccessKey;
 
@@ -585,7 +735,7 @@ export class ChatDrawingService {
 		});
 
 		if (oldAccessKey && oldAccessKey !== newAccessKey) {
-			this.internalStorageService.del(drawingStorageKey(oldAccessKey));
+			await this.deleteDrawingPng(oldAccessKey);
 		}
 
 		// persisted state is now the authoritative source; forget the live buffer
@@ -622,5 +772,57 @@ export class ChatDrawingService {
 	@bindThis
 	public readImage(accessKey: string): NodeJS.ReadableStream {
 		return this.internalStorageService.read(drawingStorageKey(accessKey));
+	}
+
+	// R2 / S3-compatible object-storage key for a drawing PNG. Uses a dedicated prefix
+	// so chat-drawing objects don't collide with Drive uploads in the same bucket.
+	private objectStorageKey(accessKey: string): string {
+		return `chat-drawings/chatdrawing-${accessKey}.png`;
+	}
+
+	// Public URL for a drawing PNG. When the instance is configured for object storage
+	// we return the direct CDN-fronted bucket URL — clients fetch from R2 directly and
+	// the app server never touches the image again. Otherwise fall back to the legacy
+	// `/chat-drawings/:key.png` route served from InternalStorage.
+	@bindThis
+	public publicImageUrl(accessKey: string | null): string | null {
+		if (!accessKey) return null;
+		if (this.meta.useObjectStorage) {
+			const baseUrl = this.meta.objectStorageBaseUrl
+				?? `${this.meta.objectStorageUseSSL ? 'https' : 'http'}://${this.meta.objectStorageEndpoint}${this.meta.objectStoragePort ? `:${this.meta.objectStoragePort}` : ''}/${this.meta.objectStorageBucket}`;
+			return `${baseUrl}/${this.objectStorageKey(accessKey)}`;
+		}
+		return `${this.config.url}/chat-drawings/${accessKey}.png`;
+	}
+
+	@bindThis
+	public async storeDrawingPng(accessKey: string, png: Buffer): Promise<void> {
+		if (this.meta.useObjectStorage && this.meta.objectStorageBucket) {
+			await this.s3Service.upload(this.meta, {
+				Bucket: this.meta.objectStorageBucket,
+				Key: this.objectStorageKey(accessKey),
+				Body: png,
+				ContentType: 'image/png',
+				CacheControl: 'max-age=31536000, immutable',
+				...(this.meta.objectStorageSetPublicRead ? { ACL: 'public-read' as const } : {}),
+			});
+		} else {
+			this.internalStorageService.saveFromBuffer(drawingStorageKey(accessKey), png);
+		}
+	}
+
+	@bindThis
+	public async deleteDrawingPng(accessKey: string): Promise<void> {
+		if (this.meta.useObjectStorage && this.meta.objectStorageBucket) {
+			// Idempotent; swallow failures so a missing old object doesn't break the save path.
+			try {
+				await this.s3Service.delete(this.meta, {
+					Bucket: this.meta.objectStorageBucket,
+					Key: this.objectStorageKey(accessKey),
+				});
+			} catch { /* noop */ }
+		} else {
+			this.internalStorageService.del(drawingStorageKey(accessKey));
+		}
 	}
 }

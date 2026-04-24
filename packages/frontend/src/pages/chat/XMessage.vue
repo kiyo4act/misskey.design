@@ -23,7 +23,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<div v-if="drawing" :class="$style.drawing">
 				<div v-if="drawing.title" :class="$style.drawingTitle"><i class="ti ti-brush"></i> {{ drawing.title }}</div>
 				<img :src="drawing.imageUrl ?? ''" :class="$style.drawingImage" alt="drawing"/>
-				<button class="_button" :class="$style.resumeButton" @click="resumeDrawing"><i class="ti ti-edit"></i> 続きから描く</button>
+				<div :class="$style.drawingActions">
+					<button class="_button" :class="$style.resumeButton" @click="resumeDrawing"><i class="ti ti-edit"></i> 続きから描く</button>
+					<button class="_button" :class="$style.resumeButton" :disabled="!drawing.imageUrl" @click="downloadDrawing"><i class="ti ti-download"></i> ダウンロード</button>
+				</div>
 			</div>
 		</MkFukidashi>
 		<MkUrlPreview v-for="url in urls" :key="url" :url="url" style="margin: 8px 0;"/>
@@ -92,6 +95,31 @@ const urls = computed(() => props.message.text ? extractUrlFromMfm(mfm.parse(pro
 const drawing = computed(() => props.message.drawing ?? null);
 const chatConnection = inject(DI.chatConnection, null);
 const chatTarget = inject(DI.chatTarget, null);
+
+async function downloadDrawing() {
+	const d = drawing.value;
+	if (!d?.imageUrl) return;
+	try {
+		// Fetch as blob so the browser downloads the file instead of navigating away;
+		// chat-drawings/*.png is served from the same origin so no CORS surprise here.
+		const res = await fetch(d.imageUrl, { credentials: 'omit', cache: 'no-store' });
+		if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+		const blob = await res.blob();
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		const safeTitle = (d.title || 'drawing').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+		const stamp = new Date(d.updatedAt ?? Date.now()).toISOString().replace(/[:.]/g, '-');
+		a.download = `${safeTitle}-${stamp}.png`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		setTimeout(() => URL.revokeObjectURL(url), 0);
+	} catch (err) {
+		console.error(err);
+		os.alert({ type: 'error', text: i18n.ts.somethingHappened });
+	}
+}
 
 function resumeDrawing() {
 	const d = drawing.value;
@@ -270,6 +298,12 @@ function showMenu(ev: PointerEvent, contextmenu = false) {
 	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
+.drawingActions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
 .resumeButton {
 	font-size: 0.85em;
 	padding: 4px 10px;
@@ -277,7 +311,12 @@ function showMenu(ev: PointerEvent, contextmenu = false) {
 	background: var(--MI_THEME-accentedBg);
 	color: var(--MI_THEME-accent);
 
-	&:hover {
+	&:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	&:hover:not(:disabled) {
 		background: var(--MI_THEME-accent);
 		color: #fff;
 	}

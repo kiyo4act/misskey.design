@@ -53,6 +53,10 @@ export const paramDef = {
 			type: 'array',
 			items: { type: 'object' },
 		},
+		// Optional client-baked composite PNG (base64). When present, the server stores
+		// it directly instead of re-running the full stroke replay — the usual hot path
+		// for saves on drawings with many fills.
+		imageBase64: { type: 'string', nullable: true },
 	},
 	required: ['drawingId', 'strokes'],
 } as const;
@@ -74,7 +78,18 @@ export default class extends Endpoint<typeof meta, typeof paramDef> { // eslint-
 				throw new ApiError(meta.errors.accessDenied);
 			}
 
-			const updated = await this.chatDrawingService.updateDrawing(me, drawing, ps.strokes);
+			let imagePng: Buffer | null = null;
+			if (typeof ps.imageBase64 === 'string' && ps.imageBase64.length > 0) {
+				try {
+					const decoded = Buffer.from(ps.imageBase64, 'base64');
+					// Sanity-check PNG magic (89 50 4E 47 0D 0A 1A 0A) and cap size at 12MB.
+					if (decoded.length > 8 && decoded.length <= 12 * 1024 * 1024
+						&& decoded[0] === 0x89 && decoded[1] === 0x50 && decoded[2] === 0x4E && decoded[3] === 0x47) {
+						imagePng = decoded;
+					}
+				} catch { /* fall back to server render */ }
+			}
+			const updated = await this.chatDrawingService.updateDrawing(me, drawing, ps.strokes, imagePng);
 			return this.chatEntityService.packDrawing(updated, me);
 		});
 	}

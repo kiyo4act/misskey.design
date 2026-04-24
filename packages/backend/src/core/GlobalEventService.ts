@@ -180,7 +180,7 @@ export interface ChatEventTypes {
 			color: string;
 			width: number;
 			tool: 'pen' | 'eraser' | 'fill' | 'paint';
-			layer?: 'main' | 'draft';
+			layer?: 'main' | 'draft' | 'lineart';
 		};
 	};
 	drawClear: {
@@ -202,6 +202,12 @@ export interface ChatEventTypes {
 		drawingId: string;
 		userId: MiUser['id'];
 		user: Packed<'UserLite'>;
+	};
+	drawingCursor: {
+		drawingId: string;
+		userId: MiUser['id'];
+		x: number;
+		y: number;
 	};
 }
 

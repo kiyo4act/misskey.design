@@ -107,6 +107,20 @@ export class ChatUserChannel extends Channel {
 				this.globalEventService.publishChatUserStream(this.otherId, this.user.id, 'drawUndo', payload);
 				break;
 			}
+			case 'drawingCursor': {
+				if (!this.otherId || !this.user) break;
+				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				if (!drawingId) break;
+				const rawX = Number(body?.x);
+				const rawY = Number(body?.y);
+				if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) break;
+				const x = Math.max(-0.1, Math.min(1.1, rawX));
+				const y = Math.max(-0.1, Math.min(1.1, rawY));
+				const payload = { drawingId, userId: this.user.id, x, y };
+				this.globalEventService.publishChatUserStream(this.user.id, this.otherId, 'drawingCursor', payload);
+				this.globalEventService.publishChatUserStream(this.otherId, this.user.id, 'drawingCursor', payload);
+				break;
+			}
 		}
 	}
 

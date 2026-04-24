@@ -284,6 +284,12 @@ export type Channels = {
 				drawingId: string;
 				strokeId: string;
 			}) => void;
+			drawingCursor: (payload: {
+				drawingId: string;
+				userId: User['id'];
+				x: number;
+				y: number;
+			}) => void;
 		};
 		receives: {
 			read: {
@@ -302,6 +308,11 @@ export type Channels = {
 			drawUndo: {
 				drawingId: string;
 				strokeId: string;
+			};
+			drawingCursor: {
+				drawingId: string;
+				x: number;
+				y: number;
 			};
 		};
 	};
@@ -347,6 +358,12 @@ export type Channels = {
 				drawingId: string;
 				strokeId: string;
 			}) => void;
+			drawingCursor: (payload: {
+				drawingId: string;
+				userId: User['id'];
+				x: number;
+				y: number;
+			}) => void;
 		};
 		receives: {
 			read: {
@@ -366,6 +383,11 @@ export type Channels = {
 				drawingId: string;
 				strokeId: string;
 			};
+			drawingCursor: {
+				drawingId: string;
+				x: number;
+				y: number;
+			};
 		};
 	};
 };
@@ -376,7 +398,7 @@ export type ChatDrawStroke = {
 	color: string;
 	width: number;
 	tool: 'pen' | 'eraser' | 'fill' | 'paint';
-	layer?: 'main' | 'draft';
+	layer?: 'main' | 'draft' | 'lineart';
 };
 
 export type NoteUpdatedEvent = { id: Note['id'] } & ({

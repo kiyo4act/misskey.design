@@ -18,7 +18,7 @@ export type ChatDrawingStroke = {
 	tool: 'pen' | 'eraser' | 'fill' | 'paint';
 	// 'main' (default) or 'draft'. Draft strokes are rendered semi-transparently underneath
 	// the main layer so they serve as an underlay sketch.
-	layer?: 'main' | 'draft';
+	layer?: 'main' | 'draft' | 'lineart';
 };
 
 @Entity('chat_drawing')

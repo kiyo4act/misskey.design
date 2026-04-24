@@ -12,7 +12,7 @@ export type ChatDrawingStroke = {
 	color: string;
 	width: number;
 	tool: 'pen' | 'eraser' | 'fill' | 'paint';
-	layer?: 'main' | 'draft';
+	layer?: 'main' | 'draft' | 'lineart';
 };
 
 export type ChatDrawingLite = Misskey.entities.ChatDrawingLite;
@@ -52,8 +52,14 @@ function compactStrokes(strokes: ChatDrawingStroke[]): ChatDrawingStroke[] {
 export function apiChatDrawingUpdate(params: {
 	drawingId: string;
 	strokes: ChatDrawingStroke[];
+	imageBase64?: string;
 }): Promise<ChatDrawing> {
-	return misskeyApi('chat/drawings/update', { ...params, strokes: compactStrokes(params.strokes) } as never) as Promise<ChatDrawing>;
+	const body: Record<string, unknown> = {
+		drawingId: params.drawingId,
+		strokes: compactStrokes(params.strokes),
+	};
+	if (params.imageBase64) body.imageBase64 = params.imageBase64;
+	return misskeyApi('chat/drawings/update', body as never) as Promise<ChatDrawing>;
 }
 
 export function apiChatDrawingShow(drawingId: string): Promise<ChatDrawing> {

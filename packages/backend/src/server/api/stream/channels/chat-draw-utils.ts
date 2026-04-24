@@ -13,7 +13,7 @@ export type SanitizedDrawStroke = {
 	color: string;
 	width: number;
 	tool: 'pen' | 'eraser' | 'fill' | 'paint';
-	layer?: 'main' | 'draft';
+	layer?: 'main' | 'draft' | 'lineart';
 };
 
 export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
@@ -56,7 +56,10 @@ export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
 		'pen';
 
 	const id = typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(raw.id) ? raw.id : undefined;
-	const layer: 'main' | 'draft' = raw.layer === 'draft' ? 'draft' : 'main';
+	const layer: 'main' | 'draft' | 'lineart' =
+		raw.layer === 'draft' ? 'draft' :
+		raw.layer === 'lineart' ? 'lineart' :
+		'main';
 
 	return { id, points, color, width, tool, layer };
 }

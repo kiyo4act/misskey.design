@@ -124,6 +124,25 @@ export class ChatRoomChannel extends Channel {
 				});
 				break;
 			}
+			case 'drawingCursor': {
+				if (!this.roomId || !this.user) break;
+				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				if (!drawingId) break;
+				const rawX = Number(body?.x);
+				const rawY = Number(body?.y);
+				if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) break;
+				// Clamp to [-0.1, 1.1] — slight overshoot is allowed so the cursor can animate off the edge,
+				// but we reject nonsense values to keep payloads tiny.
+				const x = Math.max(-0.1, Math.min(1.1, rawX));
+				const y = Math.max(-0.1, Math.min(1.1, rawY));
+				this.globalEventService.publishChatRoomStream(this.roomId, 'drawingCursor', {
+					drawingId,
+					userId: this.user.id,
+					x,
+					y,
+				});
+				break;
+			}
 		}
 	}
 

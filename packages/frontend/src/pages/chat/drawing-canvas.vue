@@ -18,96 +18,125 @@ SPDX-License-Identifier: AGPL-3.0-only
 	</template>
 
 	<div :class="$style.root" @contextmenu.prevent>
+		<!-- Row 1: tool palette + undo/redo + clear -->
 		<div :class="$style.toolbar">
 			<div :class="$style.toolGroup">
-				<button
-					class="_button"
-					:class="[$style.toolButton, tool === 'pen' ? $style.toolActive : null]"
-					title="ペン"
-					@click="tool = 'pen'"
-				>
-					<i class="ti ti-pencil"></i>
-				</button>
-				<button
-					class="_button"
-					:class="[$style.toolButton, tool === 'paint' ? $style.toolActive : null]"
-					title="厚塗り"
-					@click="tool = 'paint'"
-				>
-					<i class="ti ti-brush"></i>
-				</button>
-				<button
-					class="_button"
-					:class="[$style.toolButton, tool === 'eraser' ? $style.toolActive : null]"
-					title="消しゴム"
-					@click="tool = 'eraser'"
-				>
-					<i class="ti ti-eraser"></i>
-				</button>
-				<button
-					class="_button"
-					:class="[$style.toolButton, tool === 'fill' ? $style.toolActive : null]"
-					title="塗りつぶし"
-					@click="tool = 'fill'"
-				>
-					<i class="ti ti-paint"></i>
-				</button>
+				<button class="_button" :class="[$style.toolButton, tool === 'pen' ? $style.toolActive : null]" title="ペン" @click="tool = 'pen'"><i class="ti ti-pencil"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'paint' ? $style.toolActive : null]" title="厚塗り" @click="tool = 'paint'"><i class="ti ti-brush"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'line' ? $style.toolActive : null]" title="直線" @click="tool = 'line'"><i class="ti ti-line"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'eraser' ? $style.toolActive : null]" title="消しゴム" @click="tool = 'eraser'"><i class="ti ti-eraser"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'fill' ? $style.toolActive : null]" title="塗りつぶし" @click="tool = 'fill'"><i class="ti ti-paint"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'spoit' ? $style.toolActive : null]" title="スポイト (Alt+クリック)" @click="tool = 'spoit'"><i class="ti ti-color-picker"></i></button>
 			</div>
 
-			<label :class="$style.toolGroup">
-				<span :class="$style.toolLabel">色</span>
-				<input v-model="color" type="color" :class="$style.colorPicker" :disabled="tool === 'eraser'"/>
-			</label>
+			<div :class="$style.separator"></div>
 
-			<label :class="$style.toolGroup">
-				<span :class="$style.toolLabel">太さ</span>
+			<div :class="$style.toolGroup">
+				<button class="_button" :class="$style.toolButton" :disabled="!canUndo" title="元に戻す (Ctrl+Z)" @click="undo"><i class="ti ti-arrow-back-up"></i></button>
+				<button class="_button" :class="$style.toolButton" :disabled="!canRedo" title="やり直し (Ctrl+Y)" @click="redo"><i class="ti ti-arrow-forward-up"></i></button>
+			</div>
+
+			<div :class="$style.separator"></div>
+
+			<button
+				class="_button"
+				:class="[$style.layerToggle, currentLayer !== 'main' ? $style.toolActive : null]"
+				:title="`編集中レイヤー: ${currentLayerLabel}（クリックで切替）`"
+				@click="toggleLayer"
+			>
+				<i class="ti ti-layers-subtract"></i>
+				<span :class="$style.layerToggleLabel">{{ currentLayerLabel }}</span>
+			</button>
+
+
+			<div :class="$style.spacer"></div>
+
+			<button class="_button" :class="$style.toolButton" title="全消し" @click="clearAll"><i class="ti ti-trash"></i></button>
+		</div>
+
+		<!-- Row 2: color + brush params + layer opacity + view controls -->
+		<div :class="[$style.toolbar, $style.toolbarSecondary]">
+			<div :class="$style.toolGroup">
+				<button
+					ref="colorSwatchEl"
+					class="_button"
+					:class="$style.colorSwatch"
+					:style="{ background: composedColor }"
+					:disabled="tool === 'eraser'"
+					title="色を選択"
+					@click="toggleColorPopover"
+				>
+					<span :class="$style.colorSwatchInner" :style="{ background: composedColor }"></span>
+				</button>
+				<div v-if="recentColors.length > 0" :class="$style.recentColors" title="最近使った色">
+					<button
+						v-for="c in recentColors"
+						:key="c"
+						class="_button"
+						:class="$style.recentColorChip"
+						:style="{ background: c }"
+						:disabled="tool === 'eraser'"
+						@click="applyRecentColor(c)"
+					></button>
+				</div>
+			</div>
+
+			<div :class="$style.separator"></div>
+
+			<label :class="$style.sliderField" title="太さ">
+				<i class="ti ti-line-height" :class="$style.sliderIcon"></i>
 				<input v-model.number="width" type="range" min="1" max="60" step="1" :class="$style.widthSlider"/>
 				<span :class="$style.widthValue">{{ width }}</span>
 			</label>
 
-			<div :class="$style.toolGroup">
-				<button class="_button" :class="$style.toolButton" :disabled="!canUndo" title="元に戻す (Ctrl+Z)" @click="undo">
-					<i class="ti ti-arrow-back-up"></i>
-				</button>
-				<button class="_button" :class="$style.toolButton" :disabled="!canRedo" title="やり直し (Ctrl+Y)" @click="redo">
-					<i class="ti ti-arrow-forward-up"></i>
-				</button>
-			</div>
+			<label :class="$style.sliderField" title="不透明度" :style="tool === 'eraser' ? 'opacity: 0.4;' : ''">
+				<i class="ti ti-droplet" :class="$style.sliderIcon"></i>
+				<input v-model.number="opacity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider" :disabled="tool === 'eraser'"/>
+				<span :class="$style.widthValue">{{ Math.round(opacity * 100) }}</span>
+			</label>
 
-			<div :class="$style.toolGroup">
-				<button
-					class="_button"
-					:class="[$style.toolButton, currentLayer === 'draft' ? $style.toolActive : null]"
-					:title="currentLayer === 'draft' ? '下描レイヤー（クリックで本番に切替）' : '本番レイヤー（クリックで下描に切替）'"
-					@click="toggleLayer"
-				>
-					<i class="ti ti-layers-subtract"></i>
-					<span :class="$style.toolLabel" style="margin-left: 4px;">{{ currentLayer === 'draft' ? '下描' : '本番' }}</span>
-				</button>
-				<label :class="$style.toolGroup" title="下描の透明度">
-					<span :class="$style.toolLabel">下描</span>
-					<input v-model.number="draftOpacity" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
-					<span :class="$style.widthValue">{{ Math.round(draftOpacity * 100) }}%</span>
-				</label>
-			</div>
+			<label :class="$style.sliderField" title="手ぶれ補正">
+				<i class="ti ti-wave-saw-tool" :class="$style.sliderIcon"></i>
+				<input v-model.number="smoothing" type="range" min="0" max="20" step="1" :class="$style.widthSlider"/>
+				<span :class="$style.widthValue">{{ smoothing }}</span>
+			</label>
 
-			<div :class="$style.toolGroup">
-				<button class="_button" :class="$style.toolButton" :disabled="zoom <= MIN_ZOOM" title="縮小 (Ctrl+ホイール)" @click="zoomOut">
-					<i class="ti ti-zoom-out"></i>
-				</button>
-				<button class="_button" :class="[$style.toolButton, $style.zoomLabel]" title="100%に戻す" @click="zoomReset">
-					{{ Math.round(zoom * 100) }}%
-				</button>
-				<button class="_button" :class="$style.toolButton" :disabled="zoom >= MAX_ZOOM" title="拡大 (Ctrl+ホイール)" @click="zoomIn">
-					<i class="ti ti-zoom-in"></i>
-				</button>
-			</div>
+			<label :class="$style.sliderField" title="下描き透明度">
+				<span :class="$style.toolLabel">下描き透明度</span>
+				<input v-model.number="draftOpacity" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
+				<span :class="$style.widthValue">{{ Math.round(draftOpacity * 100) }}</span>
+			</label>
 
 			<div :class="$style.spacer"></div>
 
-			<button class="_button" :class="$style.toolButton" title="全消し" @click="clearAll">
-				<i class="ti ti-trash"></i>
-			</button>
+			<div :class="$style.toolGroup">
+				<button class="_button" :class="$style.toolButton" :disabled="zoom <= MIN_ZOOM" title="縮小 (Ctrl+ホイール)" @click="zoomOut"><i class="ti ti-zoom-out"></i></button>
+				<button class="_button" :class="[$style.toolButton, $style.zoomLabel]" title="100%に戻す" @click="zoomReset">{{ Math.round(zoom * 100) }}%</button>
+				<button class="_button" :class="$style.toolButton" :disabled="zoom >= MAX_ZOOM" title="拡大 (Ctrl+ホイール)" @click="zoomIn"><i class="ti ti-zoom-in"></i></button>
+				<button class="_button" :class="[$style.toolButton, mirrorView ? $style.toolActive : null]" title="左右反転ビュー（表示のみ）" @click="mirrorView = !mirrorView"><i class="ti ti-flip-horizontal"></i></button>
+			</div>
+		</div>
+
+		<!-- Color wheel popover -->
+		<div v-if="colorPopoverOpen" :class="$style.colorPopover" :style="colorPopoverStyle" @click.stop @mousedown.stop>
+			<canvas
+				ref="wheelCanvasEl"
+				:class="$style.wheelCanvas"
+				:width="WHEEL_SIZE"
+				:height="WHEEL_SIZE"
+				@pointerdown="onWheelPointerDown"
+				@pointermove="onWheelPointerMove"
+				@pointerup="onWheelPointerUp"
+			></canvas>
+			<div :class="$style.wheelSliderRow">
+				<span :class="$style.toolLabel" style="width: 14px;">V</span>
+				<input v-model.number="hsvV" type="range" min="0" max="1" step="0.01" :class="$style.wheelSlider"/>
+				<span :class="$style.widthValue">{{ Math.round(hsvV * 100) }}</span>
+			</div>
+			<div :class="$style.wheelSliderRow">
+				<span :class="$style.toolLabel" style="width: 14px;">#</span>
+				<input v-model="hexInput" type="text" maxlength="9" :class="$style.hexInput" @change="onHexInputCommit"/>
+			</div>
 		</div>
 
 		<div ref="canvasAreaEl" :class="$style.canvasArea">
@@ -124,7 +153,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<div :class="$style.canvasWrap" :style="{ minWidth: '100%', minHeight: '100%' }">
 					<canvas
 						ref="canvasEl"
-						:class="[$style.canvas, tool === 'fill' ? $style.canvasFillCursor : $style.canvasBrushCursor]"
+						:class="[$style.canvas, (tool === 'fill' || tool === 'spoit') ? $style.canvasFillCursor : $style.canvasBrushCursor, mirrorView ? $style.canvasMirrored : null]"
 						:width="CANVAS_W"
 						:height="CANVAS_H"
 						:style="canvasDisplayStyle"
@@ -140,18 +169,26 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 			<!-- Circular brush cursor overlay — positioned against canvasArea so it stays fixed when scrolling -->
 			<div
-				v-show="cursorVisible && tool !== 'fill'"
+				v-show="cursorVisible && tool !== 'fill' && tool !== 'spoit'"
 				:class="$style.brushCursor"
 				:style="cursorStyle"
 			></div>
+
+			<!-- Remote user cursors -->
+			<div
+				v-for="rc in visibleRemoteCursors"
+				:key="rc.userId"
+				:class="$style.remoteCursor"
+				:style="rc.style"
+			>
+				<MkAvatar :user="rc.user" :class="$style.remoteCursorAvatar" :link="false" :preview="false"/>
+				<span :class="$style.remoteCursorName">{{ rc.user.username }}</span>
+			</div>
 		</div>
 
 		<div :class="$style.footer">
 			<button class="_button" :class="$style.cancelButton" @click="close">
 				{{ i18n.ts.cancel }}
-			</button>
-			<button class="_button" :class="$style.cancelButton" title="画像をダウンロード" @click="downloadImage">
-				<i class="ti ti-download"></i> ダウンロード
 			</button>
 			<MkButton primary gradate :disabled="saving" @click="saveAndClose">
 				<template v-if="!saving"><i class="ti ti-device-floppy"></i> 保存して反映</template>
@@ -207,12 +244,21 @@ const canvasAreaEl = useTemplateRef('canvasAreaEl');
 const cursorVisible = ref(false);
 const cursorStyle = ref<{ left: string; top: string; width: string; height: string }>({ left: '0px', top: '0px', width: '0px', height: '0px' });
 
-const tool = ref<'pen' | 'eraser' | 'fill' | 'paint'>('pen');
-const currentLayer = ref<'main' | 'draft'>('main');
+// UI tools include client-only 'line' (commits as a 2-point pen stroke on pointer up)
+// and 'spoit' (eyedropper — never commits a stroke, just sets color from the pixel picked).
+const tool = ref<'pen' | 'eraser' | 'fill' | 'paint' | 'line' | 'spoit'>('pen');
+const currentLayer = ref<'main' | 'draft' | 'lineart'>('main');
 const draftOpacity = ref(0.4);
 const zoom = ref(1);
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 8;
+
+const opacity = ref<number>(1);
+// 0 = no smoothing. Higher = more latency, smoother curves. The pointer moves averaged over
+// the last N samples; we trail by (smoothing) samples, then flush the rest on pointerup.
+const smoothing = ref<number>(0);
+const mirrorView = ref<boolean>(false);
+
 
 // Layer-separated offscreen canvases. Strokes are drawn to the corresponding offscreen
 // canvas (each starts fully transparent) and then composited onto the visible canvas.
@@ -220,14 +266,258 @@ const MAX_ZOOM = 8;
 // becomes transparent where erased, letting draft show through in the composite.
 const mainCanvas = document.createElement('canvas');
 const draftCanvas = document.createElement('canvas');
-mainCanvas.width = draftCanvas.width = 0; // sized on first use
+const lineartCanvas = document.createElement('canvas');
+mainCanvas.width = draftCanvas.width = lineartCanvas.width = 0; // sized on first use
 let mainCtx: CanvasRenderingContext2D | null = null;
 let draftCtx: CanvasRenderingContext2D | null = null;
+let lineartCtx: CanvasRenderingContext2D | null = null;
+
+// Baseline (flattened) canvases hold the cumulative state for strokes[0..bakedCount-1].
+// They let redrawAll skip re-replaying old strokes — instead we blit the baseline and
+// only replay the recent window. Strokes that get baked lose their individual undo
+// patch (no longer reachable from the undo stack).
+const baselineMainCanvas = document.createElement('canvas');
+const baselineDraftCanvas = document.createElement('canvas');
+const baselineLineartCanvas = document.createElement('canvas');
+baselineMainCanvas.width = baselineDraftCanvas.width = baselineLineartCanvas.width = 0;
+let baselineMainCtx: CanvasRenderingContext2D | null = null;
+let baselineDraftCtx: CanvasRenderingContext2D | null = null;
+let baselineLineartCtx: CanvasRenderingContext2D | null = null;
+let bakedCount = 0;
+// Keep the undo window tight so only the last N of my own strokes need their
+// per-stroke patch; everything older merges into the baseline.
+const UNDO_WINDOW = 10;
 const color = ref<string>('#222222');
 const width = ref<number>(6);
 const saving = ref(false);
 const loading = ref(true);
 const title = ref<string>('');
+
+// Composed color = base hex (#RRGGBB) + alpha byte for `opacity`. Canvas' strokeStyle/fillStyle
+// respects 8-hex notation, and the server sanitizer accepts it (/^#[0-9a-fA-F]{3,8}$/), so we
+// transmit opacity via the color channel without extending the stroke schema.
+const composedColor = computed(() => {
+	const a = Math.round(Math.max(0, Math.min(1, opacity.value)) * 255).toString(16).padStart(2, '0');
+	const hex = color.value.replace('#', '').slice(0, 6).padStart(6, '0');
+	return `#${hex}${a}`;
+});
+
+// Recent colors (base hex, no alpha). Most-recently-used first, max 10.
+const recentColors = ref<string[]>([]);
+function recordRecentColor(hex: string) {
+	const normalized = hex.toLowerCase();
+	const idx = recentColors.value.indexOf(normalized);
+	if (idx >= 0) recentColors.value.splice(idx, 1);
+	recentColors.value.unshift(normalized);
+	if (recentColors.value.length > 10) recentColors.value.length = 10;
+}
+function applyRecentColor(hex: string) {
+	color.value = hex;
+	const [h, s, v] = rgbToHsv(...hexToRgb(hex));
+	hsvH.value = h;
+	hsvS.value = s;
+	hsvV.value = v;
+	hexInput.value = composedColor.value;
+}
+
+// HSV color wheel state. H in [0, 1) (angle), S in [0, 1] (radius), V in [0, 1] (slider).
+const hsvH = ref<number>(0);
+const hsvS = ref<number>(0);
+const hsvV = ref<number>(0.13);
+const hexInput = ref<string>('#222222ff');
+const colorPopoverOpen = ref<boolean>(false);
+const colorSwatchEl = useTemplateRef('colorSwatchEl');
+const wheelCanvasEl = useTemplateRef('wheelCanvasEl');
+const WHEEL_SIZE = 180;
+const colorPopoverStyle = ref<{ top: string; left: string }>({ top: '0px', left: '0px' });
+
+function hexToRgb(hex: string): [number, number, number] {
+	const s = hex.replace('#', '');
+	if (s.length === 3) return [parseInt(s[0] + s[0], 16), parseInt(s[1] + s[1], 16), parseInt(s[2] + s[2], 16)];
+	return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
+}
+function rgbToHex(r: number, g: number, b: number): string {
+	const to = (n: number) => Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, '0');
+	return `#${to(r)}${to(g)}${to(b)}`;
+}
+function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+	const rn = r / 255, gn = g / 255, bn = b / 255;
+	const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+	const d = max - min;
+	let h = 0;
+	if (d !== 0) {
+		if (max === rn) h = ((gn - bn) / d) % 6;
+		else if (max === gn) h = (bn - rn) / d + 2;
+		else h = (rn - gn) / d + 4;
+		h = h / 6;
+		if (h < 0) h += 1;
+	}
+	const s = max === 0 ? 0 : d / max;
+	return [h, s, max];
+}
+function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+	const i = Math.floor(h * 6);
+	const f = h * 6 - i;
+	const p = v * (1 - s);
+	const q = v * (1 - f * s);
+	const t = v * (1 - (1 - f) * s);
+	let r = 0, g = 0, b = 0;
+	switch (i % 6) {
+		case 0: r = v; g = t; b = p; break;
+		case 1: r = q; g = v; b = p; break;
+		case 2: r = p; g = v; b = t; break;
+		case 3: r = p; g = q; b = v; break;
+		case 4: r = t; g = p; b = v; break;
+		case 5: r = v; g = p; b = q; break;
+	}
+	return [r * 255, g * 255, b * 255];
+}
+
+// Keep `color` and `hexInput` in sync whenever H/S/V changes (driven by the wheel or V slider).
+watch([hsvH, hsvS, hsvV], () => {
+	const [r, g, b] = hsvToRgb(hsvH.value, hsvS.value, hsvV.value);
+	color.value = rgbToHex(r, g, b);
+	hexInput.value = composedColor.value;
+});
+watch(opacity, () => { hexInput.value = composedColor.value; });
+
+function onHexInputCommit() {
+	const raw = hexInput.value.trim();
+	const m = raw.match(/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/);
+	if (!m) { hexInput.value = composedColor.value; return; }
+	const hex = m[1];
+	if (hex.length === 3) {
+		color.value = `#${hex[0] + hex[0]}${hex[1] + hex[1]}${hex[2] + hex[2]}`;
+		opacity.value = 1;
+	} else if (hex.length === 6) {
+		color.value = `#${hex}`;
+		opacity.value = 1;
+	} else {
+		color.value = `#${hex.slice(0, 6)}`;
+		opacity.value = parseInt(hex.slice(6, 8), 16) / 255;
+	}
+	const [h, s, v] = rgbToHsv(...hexToRgb(color.value));
+	hsvH.value = h; hsvS.value = s; hsvV.value = v;
+}
+
+function drawWheel() {
+	const cv = wheelCanvasEl.value;
+	if (!cv) return;
+	const wctx = cv.getContext('2d');
+	if (!wctx) return;
+	const size = WHEEL_SIZE;
+	const cx = size / 2, cy = size / 2, r = size / 2 - 2;
+	const img = wctx.createImageData(size, size);
+	const data = img.data;
+	const v = hsvV.value;
+	for (let y = 0; y < size; y++) {
+		for (let x = 0; x < size; x++) {
+			const dx = x - cx, dy = y - cy;
+			const dist = Math.sqrt(dx * dx + dy * dy);
+			const idx = (y * size + x) * 4;
+			if (dist > r) {
+				data[idx + 3] = 0;
+				continue;
+			}
+			let angle = Math.atan2(dy, dx);
+			if (angle < 0) angle += Math.PI * 2;
+			const h = angle / (Math.PI * 2);
+			const s = Math.min(1, dist / r);
+			const [rr, gg, bb] = hsvToRgb(h, s, v);
+			data[idx] = rr | 0;
+			data[idx + 1] = gg | 0;
+			data[idx + 2] = bb | 0;
+			// Simple AA at the rim: fade alpha in the outermost ~1px.
+			data[idx + 3] = dist > r - 1 ? Math.round(255 * (r - dist)) : 255;
+		}
+	}
+	wctx.putImageData(img, 0, 0);
+	// Overlay current-selection ring
+	const selAngle = hsvH.value * Math.PI * 2;
+	const selR = hsvS.value * (r - 2);
+	const selX = cx + Math.cos(selAngle) * selR;
+	const selY = cy + Math.sin(selAngle) * selR;
+	wctx.save();
+	wctx.strokeStyle = '#000';
+	wctx.lineWidth = 2;
+	wctx.beginPath();
+	wctx.arc(selX, selY, 6, 0, Math.PI * 2);
+	wctx.stroke();
+	wctx.strokeStyle = '#fff';
+	wctx.lineWidth = 1;
+	wctx.beginPath();
+	wctx.arc(selX, selY, 6, 0, Math.PI * 2);
+	wctx.stroke();
+	wctx.restore();
+}
+
+// Repaint the wheel when V changes or when the popover opens (canvas starts blank).
+watch([hsvV, hsvH, hsvS, colorPopoverOpen], () => {
+	if (colorPopoverOpen.value) {
+		// Wait a tick so the canvas is actually mounted when we draw.
+		requestAnimationFrame(drawWheel);
+	}
+});
+
+let wheelDragging = false;
+function onWheelPointerDown(ev: PointerEvent) {
+	wheelDragging = true;
+	wheelCanvasEl.value?.setPointerCapture(ev.pointerId);
+	applyWheelPick(ev);
+}
+function onWheelPointerMove(ev: PointerEvent) {
+	if (!wheelDragging) return;
+	applyWheelPick(ev);
+}
+function onWheelPointerUp(ev: PointerEvent) {
+	if (!wheelDragging) return;
+	wheelDragging = false;
+	try { wheelCanvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
+}
+function applyWheelPick(ev: PointerEvent) {
+	const cv = wheelCanvasEl.value;
+	if (!cv) return;
+	const rect = cv.getBoundingClientRect();
+	const x = ev.clientX - rect.left;
+	const y = ev.clientY - rect.top;
+	const cx = rect.width / 2, cy = rect.height / 2;
+	const dx = x - cx, dy = y - cy;
+	const r = rect.width / 2 - 2;
+	const dist = Math.sqrt(dx * dx + dy * dy);
+	let angle = Math.atan2(dy, dx);
+	if (angle < 0) angle += Math.PI * 2;
+	hsvH.value = angle / (Math.PI * 2);
+	hsvS.value = Math.max(0, Math.min(1, dist / r));
+}
+
+function toggleColorPopover() {
+	if (colorPopoverOpen.value) {
+		colorPopoverOpen.value = false;
+		return;
+	}
+	const btn = colorSwatchEl.value as unknown as HTMLElement | null;
+	if (btn) {
+		const rect = btn.getBoundingClientRect();
+		colorPopoverStyle.value = {
+			top: `${rect.bottom + 4}px`,
+			left: `${Math.min(rect.left, window.innerWidth - 240)}px`,
+		};
+	}
+	colorPopoverOpen.value = true;
+	// Initialize HSV state from the current color
+	const [h, s, v] = rgbToHsv(...hexToRgb(color.value));
+	hsvH.value = h; hsvS.value = s; hsvV.value = v;
+	hexInput.value = composedColor.value;
+}
+
+function closeColorPopoverOnOutside(ev: MouseEvent) {
+	if (!colorPopoverOpen.value) return;
+	const target = ev.target as Node;
+	const btn = colorSwatchEl.value as unknown as HTMLElement | null;
+	if (btn && btn.contains(target)) return;
+	// Any click outside the wheel closes it (the popover itself stops propagation via @click.stop)
+	colorPopoverOpen.value = false;
+}
 
 const strokes = ref<ChatDrawingStroke[]>([]);
 
@@ -237,6 +527,88 @@ const myUndoStack = ref<string[]>([]);
 const myRedoStack = ref<ChatDrawingStroke[]>([]);
 const canUndo = computed(() => myUndoStack.value.length > 0);
 const canRedo = computed(() => myRedoStack.value.length > 0);
+
+// Pre-stroke patches keyed by stroke id. Used to restore the affected region on undo in
+// O(bbox), skipping the O(strokes) redrawAll path. Evicted oldest-first past the cap.
+type StrokePatch = {
+	layer: 'main' | 'draft' | 'lineart';
+	x: number;
+	y: number;
+	imageData: ImageData;
+};
+const strokePatches = new Map<string, StrokePatch>();
+const MAX_UNDO_HISTORY = 10;
+
+// Reusable full-layer snapshot grabbed at stroke start. We don't know the stroke's bbox
+// until it finishes, so we snapshot the whole target layer up front and extract just the
+// bbox region at commit time. The line tool also uses this snapshot to wipe its live
+// preview between pointer moves, replacing the old `lineLayerSnapshot`.
+let preStrokeLayerSnapshot: ImageData | null = null;
+let preStrokeLayerTarget: 'main' | 'draft' | 'lineart' | null = null;
+
+function grabPreStrokeSnapshot(layer: 'main' | 'draft' | 'lineart') {
+	const ctx = getLayerCtx(layer);
+	preStrokeLayerTarget = layer;
+	preStrokeLayerSnapshot = ctx.getImageData(0, 0, CANVAS_W, CANVAS_H);
+}
+
+function computeStrokeBbox(stroke: ChatDrawingStroke): { x: number; y: number; w: number; h: number } {
+	if (stroke.tool === 'fill' || stroke.points.length === 0) {
+		return { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H };
+	}
+	const widthPx = Math.max(1, stroke.width * CANVAS_W);
+	const pad = Math.ceil(widthPx / 2 + 2);
+	let minX = CANVAS_W, minY = CANVAS_H, maxX = 0, maxY = 0;
+	for (const p of stroke.points) {
+		const x = p[0] * CANVAS_W;
+		const y = p[1] * CANVAS_H;
+		if (x < minX) minX = x;
+		if (y < minY) minY = y;
+		if (x > maxX) maxX = x;
+		if (y > maxY) maxY = y;
+	}
+	const x = Math.max(0, Math.floor(minX - pad));
+	const y = Math.max(0, Math.floor(minY - pad));
+	const x2 = Math.min(CANVAS_W, Math.ceil(maxX + pad));
+	const y2 = Math.min(CANVAS_H, Math.ceil(maxY + pad));
+	return { x, y, w: Math.max(1, x2 - x), h: Math.max(1, y2 - y) };
+}
+
+// Extract a sub-region of an ImageData without a round-trip through a canvas.
+function extractImageDataRegion(src: ImageData, x: number, y: number, w: number, h: number): ImageData {
+	const out = new ImageData(w, h);
+	const srcW = src.width;
+	for (let row = 0; row < h; row++) {
+		const srcStart = ((y + row) * srcW + x) * 4;
+		out.data.set(src.data.subarray(srcStart, srcStart + w * 4), row * w * 4);
+	}
+	return out;
+}
+
+function commitStrokePatch(stroke: ChatDrawingStroke) {
+	if (!stroke.id || !preStrokeLayerSnapshot || !preStrokeLayerTarget) return;
+	const bbox = computeStrokeBbox(stroke);
+	strokePatches.set(stroke.id, {
+		layer: preStrokeLayerTarget,
+		x: bbox.x,
+		y: bbox.y,
+		imageData: extractImageDataRegion(preStrokeLayerSnapshot, bbox.x, bbox.y, bbox.w, bbox.h),
+	});
+	preStrokeLayerSnapshot = null;
+	preStrokeLayerTarget = null;
+	// Evict oldest patches past the cap. Their strokes remain undoable via the redrawAll
+	// fallback, just without the O(bbox) fast path.
+	while (myUndoStack.value.length > MAX_UNDO_HISTORY) {
+		const evicted = myUndoStack.value.shift();
+		if (evicted) strokePatches.delete(evicted);
+	}
+}
+
+function clearStrokePatches() {
+	strokePatches.clear();
+	preStrokeLayerSnapshot = null;
+	preStrokeLayerTarget = null;
+}
 
 function newStrokeId(): string {
 	// 16 url-safe chars, matches the server-side /^[A-Za-z0-9_-]{1,32}$/ regex
@@ -262,10 +634,57 @@ const visibleParticipants = computed(() => {
 let presenceInterval: ReturnType<typeof setInterval> | null = null;
 let tickInterval: ReturnType<typeof setInterval> | null = null;
 
+// Remote cursor state. Entries expire 2s after the last update so they fade quickly
+// when a peer stops moving (or leaves).
+const REMOTE_CURSOR_TTL_MS = 2500;
+const remoteCursors = ref<Map<string, { x: number; y: number; updatedAt: number }>>(new Map());
+const visibleRemoteCursors = computed(() => {
+	const out: { userId: string; user: Misskey.entities.UserLite; style: { left: string; top: string } }[] = [];
+	if (!canvasEl.value || !canvasAreaEl.value) return out;
+	const canvasRect = canvasEl.value.getBoundingClientRect();
+	const areaRect = canvasAreaEl.value.getBoundingClientRect();
+	for (const [userId, entry] of remoteCursors.value.entries()) {
+		if (entry.updatedAt + REMOTE_CURSOR_TTL_MS < now.value) continue;
+		const p = participants.value.get(userId);
+		if (!p) continue;
+		let x = entry.x;
+		// The mirror view only flips what I see locally, so other users' cursors stay in
+		// the original coordinate space; compensate here if my view is mirrored.
+		if (mirrorView.value) x = 1 - x;
+		const px = canvasRect.left - areaRect.left + x * canvasRect.width;
+		const py = canvasRect.top - areaRect.top + entry.y * canvasRect.height;
+		out.push({
+			userId,
+			user: p.user,
+			style: { left: `${px}px`, top: `${py}px` },
+		});
+	}
+	return out;
+});
+
+// Throttle outgoing cursor broadcasts — ~30Hz is smooth enough visually and keeps WS traffic low.
+const CURSOR_SEND_INTERVAL_MS = 33;
+let lastCursorSentAt = 0;
+let lastCursorSentPos: { x: number; y: number } | null = null;
+function sendCursor(x: number, y: number) {
+	const t = performance.now();
+	if (t - lastCursorSentAt < CURSOR_SEND_INTERVAL_MS) return;
+	if (lastCursorSentPos && Math.abs(lastCursorSentPos.x - x) < 0.001 && Math.abs(lastCursorSentPos.y - y) < 0.001) return;
+	lastCursorSentAt = t;
+	lastCursorSentPos = { x, y };
+	props.connection.send('drawingCursor', { drawingId: props.drawingId, x, y });
+}
+
 let ctx: CanvasRenderingContext2D | null = null;
 let isDrawingStroke = false;
 let activePointerId: number | null = null;
+// currentPoints: committed, already drawn (stabilized) trailing path
 let currentPoints: [number, number, number][] = [];
+// rawBuffer: recent raw pointer samples used to compute the moving-average "smoothed" head
+let rawBuffer: [number, number, number][] = [];
+// Line tool working state. The preview wipe-to-pre-state uses preStrokeLayerSnapshot
+// (grabbed at onPointerDown) — no separate snapshot is needed.
+let lineStart: [number, number, number] | null = null;
 
 function pressureFromEvent(ev: PointerEvent): number {
 	// Only honour actual pen-tablet pressure. Mouse reports a constant 0.5 while the
@@ -292,11 +711,100 @@ function ensureLayerCanvases() {
 		draftCanvas.height = CANVAS_H;
 		draftCtx = draftCanvas.getContext('2d', { willReadFrequently: true });
 	}
+	if (lineartCanvas.width !== CANVAS_W || lineartCanvas.height !== CANVAS_H) {
+		lineartCanvas.width = CANVAS_W;
+		lineartCanvas.height = CANVAS_H;
+		lineartCtx = lineartCanvas.getContext('2d', { willReadFrequently: true });
+	}
 }
 
-function getLayerCtx(layer: 'main' | 'draft'): CanvasRenderingContext2D {
+function ensureBaselineCanvases() {
+	if (baselineMainCanvas.width !== CANVAS_W || baselineMainCanvas.height !== CANVAS_H) {
+		baselineMainCanvas.width = CANVAS_W;
+		baselineMainCanvas.height = CANVAS_H;
+		baselineMainCtx = baselineMainCanvas.getContext('2d', { willReadFrequently: true });
+	}
+	if (baselineDraftCanvas.width !== CANVAS_W || baselineDraftCanvas.height !== CANVAS_H) {
+		baselineDraftCanvas.width = CANVAS_W;
+		baselineDraftCanvas.height = CANVAS_H;
+		baselineDraftCtx = baselineDraftCanvas.getContext('2d', { willReadFrequently: true });
+	}
+	if (baselineLineartCanvas.width !== CANVAS_W || baselineLineartCanvas.height !== CANVAS_H) {
+		baselineLineartCanvas.width = CANVAS_W;
+		baselineLineartCanvas.height = CANVAS_H;
+		baselineLineartCtx = baselineLineartCanvas.getContext('2d', { willReadFrequently: true });
+	}
+}
+
+function getBaselineLayerCtx(layer: 'main' | 'draft' | 'lineart'): CanvasRenderingContext2D {
+	ensureBaselineCanvases();
+	if (layer === 'draft') return baselineDraftCtx!;
+	if (layer === 'lineart') return baselineLineartCtx!;
+	return baselineMainCtx!;
+}
+
+function resetBaseline() {
+	ensureBaselineCanvases();
+	for (const ctx of [baselineMainCtx!, baselineDraftCtx!, baselineLineartCtx!]) {
+		ctx.save();
+		ctx.setTransform(1, 0, 0, 1, 0, 0);
+		ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+		ctx.restore();
+	}
+	bakedCount = 0;
+}
+
+// Snapshot the current live layer canvases into the baseline canvases. Used right after
+// the initial full redraw on load so subsequent redrawAll can start from a flat bitmap
+// instead of replaying the entire stored stroke history again.
+function snapshotBaselineFromLive() {
+	ensureBaselineCanvases();
 	ensureLayerCanvases();
-	return (layer === 'draft' ? draftCtx : mainCtx)!;
+	for (const [dst, src] of [
+		[baselineMainCtx!, mainCanvas] as const,
+		[baselineDraftCtx!, draftCanvas] as const,
+		[baselineLineartCtx!, lineartCanvas] as const,
+	]) {
+		dst.save();
+		dst.setTransform(1, 0, 0, 1, 0, 0);
+		dst.globalCompositeOperation = 'copy';
+		dst.drawImage(src, 0, 0);
+		dst.restore();
+	}
+	bakedCount = strokes.value.length;
+}
+
+// Apply the next un-baked stroke to the baseline canvases. The stroke is dropped from
+// the undo stack + patch map since it can no longer be individually undone.
+function bakeOneStroke() {
+	if (bakedCount >= strokes.value.length) return;
+	ensureBaselineCanvases();
+	const stroke = strokes.value[bakedCount];
+	const layer = resolveStrokeLayer(stroke);
+	renderStrokeToCtx(getBaselineLayerCtx(layer), stroke, {
+		main: baselineMainCanvas,
+		draft: baselineDraftCanvas,
+		lineart: baselineLineartCanvas,
+	});
+	if (stroke.id) {
+		const i = myUndoStack.value.indexOf(stroke.id);
+		if (i >= 0) myUndoStack.value.splice(i, 1);
+		strokePatches.delete(stroke.id);
+	}
+	bakedCount++;
+}
+
+function maybeBakeOverflow() {
+	while (strokes.value.length - bakedCount > UNDO_WINDOW) {
+		bakeOneStroke();
+	}
+}
+
+function getLayerCtx(layer: 'main' | 'draft' | 'lineart'): CanvasRenderingContext2D {
+	ensureLayerCanvases();
+	if (layer === 'draft') return draftCtx!;
+	if (layer === 'lineart') return lineartCtx!;
+	return mainCtx!;
 }
 
 function recompositeDisplay() {
@@ -312,19 +820,19 @@ function recompositeDisplay() {
 	c.drawImage(draftCanvas, 0, 0);
 	c.globalAlpha = 1;
 	c.drawImage(mainCanvas, 0, 0);
+	// Lineart layer always sits on top of main so colour fills never obscure line work.
+	c.drawImage(lineartCanvas, 0, 0);
 	c.restore();
 }
 
 function clearCanvas() {
 	ensureLayerCanvases();
-	mainCtx!.save();
-	mainCtx!.setTransform(1, 0, 0, 1, 0, 0);
-	mainCtx!.clearRect(0, 0, CANVAS_W, CANVAS_H);
-	mainCtx!.restore();
-	draftCtx!.save();
-	draftCtx!.setTransform(1, 0, 0, 1, 0, 0);
-	draftCtx!.clearRect(0, 0, CANVAS_W, CANVAS_H);
-	draftCtx!.restore();
+	for (const lc of [mainCtx!, draftCtx!, lineartCtx!]) {
+		lc.save();
+		lc.setTransform(1, 0, 0, 1, 0, 0);
+		lc.clearRect(0, 0, CANVAS_W, CANVAS_H);
+		lc.restore();
+	}
 	recompositeDisplay();
 }
 
@@ -336,18 +844,42 @@ function hexToRgba(hex: string): [number, number, number, number] {
 	return [0, 0, 0, 255];
 }
 
-// Tolerance + coverage blending + gap-tolerant propagation.
-//  - FLOOD_TOLERANCE: barrier = any pixel whose channel diff from seed exceeds this.
-//  - GAP_CLOSE_RADIUS: barrier mask is morphologically dilated by this radius, so small
-//    gaps in outlines don't leak. Propagation is blocked across dilated barriers, but
-//    blending at each filled pixel still uses the pixel's true distance to the seed, so
-//    anti-aliased outline edges stay smooth.
-const FLOOD_TOLERANCE = 80;
+// Tolerance + gap-tolerant propagation.
+//  - FLOOD_RGB_TOLERANCE: for OPAQUE seeds, how much RGB channel drift is still "inside".
+//    Generous so anti-aliased colored edges get swallowed without leaving a halo.
+//  - FLOOD_ALPHA_TOLERANCE: stricter independent alpha threshold. Pen-tablet pressure-
+//    sensitive strokes can land pixels with alpha as low as ~15 at the core when pressure
+//    is light; without a tight alpha gate the fill walks right through them. 16 means any
+//    pixel with >6% opacity counts as barrier.
+//  - GAP_CLOSE_RADIUS: morphological closing fills gaps in the (now sparser) barrier so
+//    tablet-thin pens still form a continuous enclosure.
+//  - RIM_TOLERANCE: secondary pass softly blends barrier pixels adjacent to filled ones
+//    so the transition from fill color to pen color is smooth rather than stepped.
+const FLOOD_RGB_TOLERANCE = 140;
+const FLOOD_ALPHA_TOLERANCE = 16;
+const RIM_TOLERANCE = 230;
 const GAP_CLOSE_RADIUS = 3;
+// Fills are on a separate layer from the outline, so we can overshoot by a couple of
+// pixels into the outline's anti-alias to eliminate the white halo without damaging
+// the line work itself.
+const FILL_DILATE_ITERATIONS = 2;
+
+// Scratch Uint8Array pool for flood-fill. Previously each fill allocated ~6 full-canvas
+// masks (~5MB) that immediately became GC garbage. Slot convention:
+//   0: dilate/erode horizontal-pass temp   3: dilation frontier "next"
+//   1: visited                              4: rim-processed
+//   2: dilation frontier                    (barrier still fresh-allocated per fill)
+const scratchPool: (Uint8Array | null)[] = [null, null, null, null, null];
+function getScratch(slot: number, n: number): Uint8Array {
+	let buf = scratchPool[slot];
+	if (!buf || buf.length < n) { buf = new Uint8Array(n); scratchPool[slot] = buf; }
+	else buf.fill(0);
+	return buf;
+}
 
 function dilateMask(mask: Uint8Array, w: number, h: number, radius: number): Uint8Array {
 	const n = w * h;
-	const temp = new Uint8Array(n);
+	const temp = getScratch(0, n);
 	for (let y = 0; y < h; y++) {
 		const rowOff = y * w;
 		for (let x = 0; x < w; x++) {
@@ -360,7 +892,6 @@ function dilateMask(mask: Uint8Array, w: number, h: number, radius: number): Uin
 			temp[rowOff + x] = any;
 		}
 	}
-	const result = new Uint8Array(n);
 	for (let x = 0; x < w; x++) {
 		for (let y = 0; y < h; y++) {
 			let any = 0;
@@ -369,15 +900,15 @@ function dilateMask(mask: Uint8Array, w: number, h: number, radius: number): Uin
 			for (let yy = yMin; yy <= yMax; yy++) {
 				if (temp[yy * w + x]) { any = 1; break; }
 			}
-			result[y * w + x] = any;
+			mask[y * w + x] = any;
 		}
 	}
-	return result;
+	return mask;
 }
 
 function erodeMask(mask: Uint8Array, w: number, h: number, radius: number): Uint8Array {
 	const n = w * h;
-	const temp = new Uint8Array(n);
+	const temp = getScratch(0, n);
 	for (let y = 0; y < h; y++) {
 		const rowOff = y * w;
 		for (let x = 0; x < w; x++) {
@@ -390,7 +921,6 @@ function erodeMask(mask: Uint8Array, w: number, h: number, radius: number): Uint
 			temp[rowOff + x] = all;
 		}
 	}
-	const result = new Uint8Array(n);
 	for (let x = 0; x < w; x++) {
 		for (let y = 0; y < h; y++) {
 			let all = 1;
@@ -399,10 +929,10 @@ function erodeMask(mask: Uint8Array, w: number, h: number, radius: number): Uint
 			for (let yy = yMin; yy <= yMax; yy++) {
 				if (!temp[yy * w + x]) { all = 0; break; }
 			}
-			result[y * w + x] = all;
+			mask[y * w + x] = all;
 		}
 	}
-	return result;
+	return mask;
 }
 
 function buildClosedBarrier(data: Uint8ClampedArray, w: number, h: number, tR: number, tG: number, tB: number, tA: number, radius: number): Uint8Array {
@@ -410,44 +940,101 @@ function buildClosedBarrier(data: Uint8ClampedArray, w: number, h: number, tR: n
 	const barrier = new Uint8Array(n);
 	for (let i = 0; i < n; i++) {
 		const pos = i * 4;
-		const d = Math.max(
+		const rgbD = Math.max(
 			Math.abs(data[pos] - tR),
 			Math.abs(data[pos + 1] - tG),
 			Math.abs(data[pos + 2] - tB),
-			Math.abs(data[pos + 3] - tA),
 		);
-		if (d > FLOOD_TOLERANCE) barrier[i] = 1;
+		const alphaD = Math.abs(data[pos + 3] - tA);
+		if (rgbD > FLOOD_RGB_TOLERANCE || alphaD > FLOOD_ALPHA_TOLERANCE) barrier[i] = 1;
 	}
 	if (radius <= 0) return barrier;
 	const dilated = dilateMask(barrier, w, h, radius);
 	return erodeMask(dilated, w, h, radius);
 }
 
-function floodFillOnContext(c: CanvasRenderingContext2D, sx: number, sy: number, hexColor: string) {
+// Build a composite ImageData of the given layers (z-ordered, no bg). Used as the fill's
+// sample source so lineart strokes drawn on a separate layer still act as barriers for
+// fills on main (and vice versa).
+// Shared sample canvas reused across every fill — creating a fresh 1024×768 canvas per
+// fill was the biggest allocation cost during save/resume replay.
+const fillSampleCanvas = document.createElement('canvas');
+let fillSampleCtx: CanvasRenderingContext2D | null = null;
+// Optional `sources` lets callers substitute alternate canvases per layer — used during
+// baking so fills read the baseline state rather than the full live state.
+function compositeLayerData(
+	layers: ('main' | 'draft' | 'lineart')[],
+	sources?: { main?: HTMLCanvasElement; draft?: HTMLCanvasElement; lineart?: HTMLCanvasElement },
+): Uint8ClampedArray {
+	ensureLayerCanvases();
+	if (fillSampleCanvas.width !== CANVAS_W || fillSampleCanvas.height !== CANVAS_H) {
+		fillSampleCanvas.width = CANVAS_W;
+		fillSampleCanvas.height = CANVAS_H;
+		fillSampleCtx = fillSampleCanvas.getContext('2d', { willReadFrequently: true });
+	}
+	const sctx = fillSampleCtx!;
+	sctx.save();
+	sctx.setTransform(1, 0, 0, 1, 0, 0);
+	sctx.globalCompositeOperation = 'source-over';
+	sctx.globalAlpha = 1;
+	sctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+	for (const layer of layers) {
+		const fallback = layer === 'draft' ? draftCanvas : layer === 'lineart' ? lineartCanvas : mainCanvas;
+		sctx.drawImage(sources?.[layer] ?? fallback, 0, 0);
+	}
+	sctx.restore();
+	return sctx.getImageData(0, 0, CANVAS_W, CANVAS_H).data;
+}
+
+// `sampleLayers` is the layer set used for seed/barrier detection (what the user sees as
+// "the line"); `c` is the target layer the fill writes to. Defaults to sampling the
+// target layer alone for backward compat.
+function floodFillOnContext(
+	c: CanvasRenderingContext2D,
+	sx: number, sy: number, hexColor: string,
+	sampleLayers?: ('main' | 'draft' | 'lineart')[],
+	sources?: { main?: HTMLCanvasElement; draft?: HTMLCanvasElement; lineart?: HTMLCanvasElement },
+) {
 	sx = Math.max(0, Math.min(CANVAS_W - 1, Math.floor(sx)));
 	sy = Math.max(0, Math.min(CANVAS_H - 1, Math.floor(sy)));
 	const imageData = c.getImageData(0, 0, CANVAS_W, CANVAS_H);
 	const data = imageData.data;
 	const w = CANVAS_W;
 	const h = CANVAS_H;
+	// Source for seed + barrier: composite of the requested layers (or the target alone).
+	const sampleData = sampleLayers && sampleLayers.length > 0
+		? compositeLayerData(sampleLayers, sources)
+		: data;
 	const startPos = (sy * w + sx) * 4;
-	const tR = data[startPos], tG = data[startPos + 1], tB = data[startPos + 2], tA = data[startPos + 3];
+	const tR = sampleData[startPos], tG = sampleData[startPos + 1], tB = sampleData[startPos + 2], tA = sampleData[startPos + 3];
 	const [fR, fG, fB, fA] = hexToRgba(hexColor);
-	if (tR === fR && tG === fG && tB === fB && tA === fA) return;
+	if (sampleData === data && tR === fR && tG === fG && tB === fB && tA === fA) return;
 
-	const barrier = buildClosedBarrier(data, w, h, tR, tG, tB, tA, GAP_CLOSE_RADIUS);
+	const barrier = buildClosedBarrier(sampleData, w, h, tR, tG, tB, tA, GAP_CLOSE_RADIUS);
 	barrier[sy * w + sx] = 0;
 
-	const visited = new Uint8Array(w * h);
-	const diff = (pos: number) => Math.max(
-		Math.abs(data[pos] - tR),
-		Math.abs(data[pos + 1] - tG),
-		Math.abs(data[pos + 2] - tB),
-		Math.abs(data[pos + 3] - tA),
+	const visited = getScratch(1, w * h);
+	// Distance from seed in the sample composite (what the user sees).
+	const sampleDiff = (pos: number) => Math.max(
+		Math.abs(sampleData[pos] - tR),
+		Math.abs(sampleData[pos + 1] - tG),
+		Math.abs(sampleData[pos + 2] - tB),
+		Math.abs(sampleData[pos + 3] - tA),
 	);
+	// Visited pixels are fully replaced on the TARGET layer — inside the fill region, so
+	// partial blending would leave a lighter halo. Boundary softness is handled by the rim pass.
 	const blendAt = (pos: number) => {
-		const d = diff(pos);
-		const ratio = d === 0 ? 1 : Math.max(0, 1 - d / FLOOD_TOLERANCE);
+		data[pos] = fR;
+		data[pos + 1] = fG;
+		data[pos + 2] = fB;
+		data[pos + 3] = fA;
+	};
+	// For barrier pixels close to the seed in the sample composite, blend the fill color
+	// into the target pixel proportionally so the outline fades smoothly to the fill colour.
+	const rimBlendAt = (pos: number) => {
+		const d = sampleDiff(pos);
+		if (d >= RIM_TOLERANCE) return;
+		const ratio = Math.max(0, 1 - d / RIM_TOLERANCE);
 		data[pos] = Math.round(data[pos] + (fR - data[pos]) * ratio);
 		data[pos + 1] = Math.round(data[pos + 1] + (fG - data[pos + 1]) * ratio);
 		data[pos + 2] = Math.round(data[pos + 2] + (fB - data[pos + 2]) * ratio);
@@ -499,9 +1086,16 @@ function floodFillOnContext(c: CanvasRenderingContext2D, sx: number, sy: number,
 		const tryPush = (nIdx: number) => {
 			if (visited[nIdx]) return;
 			if (!barrier[nIdx]) return;
-			if (diff(nIdx * 4) > FLOOD_TOLERANCE) return;
+			const pos = nIdx * 4;
+			const rgbD = Math.max(
+				Math.abs(sampleData[pos] - tR),
+				Math.abs(sampleData[pos + 1] - tG),
+				Math.abs(sampleData[pos + 2] - tB),
+			);
+			const alphaD = Math.abs(sampleData[pos + 3] - tA);
+			if (rgbD > FLOOD_RGB_TOLERANCE || alphaD > FLOOD_ALPHA_TOLERANCE) return;
 			visited[nIdx] = 1;
-			blendAt(nIdx * 4);
+			blendAt(pos);
 			q.push(nIdx);
 		};
 		for (let idx = 0; idx < w * h; idx++) {
@@ -525,15 +1119,92 @@ function floodFillOnContext(c: CanvasRenderingContext2D, sx: number, sy: number,
 		}
 	}
 
+	// Dilation pass: overshoot the fill into the outline's anti-alias zone. Extends visited
+	// by growing one pixel per iteration into adjacent BARRIER pixels (i.e. the outline
+	// itself) with full fill colour. Safe because target layer and outline layer are
+	// separate — we're not touching the line work, only colouring the target side.
+	// Constrained to barrier AND sampleDiff < RIM_TOLERANCE so we can never cross a deep
+	// outline or spill into a different region.
+	{
+		let frontier = getScratch(2, w * h);
+		let next = getScratch(3, w * h);
+		for (let idx = 0; idx < w * h; idx++) if (visited[idx]) frontier[idx] = 1;
+		for (let iter = 0; iter < FILL_DILATE_ITERATIONS; iter++) {
+			next.fill(0);
+			let grew = false;
+			for (let idx = 0; idx < w * h; idx++) {
+				if (!frontier[idx]) continue;
+				const y = (idx / w) | 0;
+				const x = idx - y * w;
+				const neighbors = [
+					x > 0 ? idx - 1 : -1,
+					x < w - 1 ? idx + 1 : -1,
+					y > 0 ? idx - w : -1,
+					y < h - 1 ? idx + w : -1,
+				];
+				for (const n of neighbors) {
+					if (n < 0 || visited[n]) continue;
+					if (!barrier[n]) continue;
+					if (sampleDiff(n * 4) >= RIM_TOLERANCE) continue;
+					const pos = n * 4;
+					data[pos] = fR;
+					data[pos + 1] = fG;
+					data[pos + 2] = fB;
+					data[pos + 3] = fA;
+					visited[n] = 1;
+					next[n] = 1;
+					grew = true;
+				}
+			}
+			if (!grew) break;
+			const swap = frontier; frontier = next; next = swap;
+		}
+	}
+
+	// Rim pass: one more layer of partial-alpha blend against anything still adjacent to
+	// visited but outside the dilation limit. Eliminates any residual hairline where the
+	// dilation stopped before the outline's true edge.
+	{
+		const rimProcessed = getScratch(4, w * h);
+		for (let idx = 0; idx < w * h; idx++) {
+			if (!visited[idx]) continue;
+			const y = (idx / w) | 0;
+			const x = idx - y * w;
+			const neighbors = [
+				x > 0 ? idx - 1 : -1,
+				x < w - 1 ? idx + 1 : -1,
+				y > 0 ? idx - w : -1,
+				y < h - 1 ? idx + w : -1,
+			];
+			for (const n of neighbors) {
+				if (n < 0) continue;
+				if (visited[n] || rimProcessed[n]) continue;
+				rimProcessed[n] = 1;
+				rimBlendAt(n * 4);
+			}
+		}
+	}
+
 	c.putImageData(imageData, 0, 0);
 }
 
-function renderStrokeToCtx(c: CanvasRenderingContext2D, stroke: ChatDrawingStroke) {
+function renderStrokeToCtx(
+	c: CanvasRenderingContext2D,
+	stroke: ChatDrawingStroke,
+	sources?: { main?: HTMLCanvasElement; draft?: HTMLCanvasElement; lineart?: HTMLCanvasElement },
+) {
 	if (stroke.points.length === 0) return;
 
 	if (stroke.tool === 'fill') {
 		const p0 = stroke.points[0];
-		floodFillOnContext(c, p0[0] * CANVAS_W, p0[1] * CANVAS_H, stroke.color);
+		// Fills on main or lineart use the combined main+lineart composite so a lineart
+		// outline drawn on a separate layer still blocks fills on main (and vice versa).
+		// Fills on draft stay layer-local — draft is the sketch/underlay and its shapes
+		// shouldn't be influenced by final line work.
+		const strokeLayer = stroke.layer === 'draft' ? 'draft' : stroke.layer === 'lineart' ? 'lineart' : 'main';
+		const sampleLayers: ('main' | 'draft' | 'lineart')[] =
+			strokeLayer === 'draft' ? ['draft'] : ['main', 'lineart'];
+		floodFillOnContext(c, p0[0] * CANVAS_W, p0[1] * CANVAS_H, stroke.color, sampleLayers, sources);
 		return;
 	}
 
@@ -580,30 +1251,77 @@ function renderStrokeToCtx(c: CanvasRenderingContext2D, stroke: ChatDrawingStrok
 	c.restore();
 }
 
+function resolveStrokeLayer(stroke: ChatDrawingStroke): 'main' | 'draft' | 'lineart' {
+	if (stroke.layer === 'draft') return 'draft';
+	if (stroke.layer === 'lineart') return 'lineart';
+	return 'main';
+}
+
 function renderStroke(stroke: ChatDrawingStroke) {
-	const layer = stroke.layer === 'draft' ? 'draft' : 'main';
-	renderStrokeToCtx(getLayerCtx(layer), stroke);
+	renderStrokeToCtx(getLayerCtx(resolveStrokeLayer(stroke)), stroke);
 	recompositeDisplay();
 }
 
-function redrawAll() {
-	clearCanvas();
-	// Separate, then render onto each layer canvas. Layer ordering for display happens
-	// in recompositeDisplay (draft drawn first, main on top).
-	const draft: ChatDrawingStroke[] = [];
-	const main: ChatDrawingStroke[] = [];
-	for (const s of strokes.value) {
-		if (s.layer === 'draft') draft.push(s);
-		else main.push(s);
+// Each redrawAll gets a fresh epoch; in-flight chunked replays check it on every frame
+// and bail out if a newer redraw has been kicked off. Prevents overlapping renders from
+// clobbering each other's partial output.
+let redrawEpoch = 0;
+
+function redrawAll(): Promise<void> {
+	const myEpoch = ++redrawEpoch;
+	ensureLayerCanvases();
+	ensureBaselineCanvases();
+	// Reset live layers to baseline (flattened state for strokes[0..bakedCount-1]) so
+	// redraw only replays the recent un-baked window. For fresh drawings baseline is
+	// empty and this behaves like the old clear-and-full-replay.
+	for (const [dst, src] of [
+		[mainCtx!, baselineMainCanvas] as const,
+		[draftCtx!, baselineDraftCanvas] as const,
+		[lineartCtx!, baselineLineartCanvas] as const,
+	]) {
+		dst.save();
+		dst.setTransform(1, 0, 0, 1, 0, 0);
+		dst.globalCompositeOperation = 'copy';
+		dst.drawImage(src, 0, 0);
+		dst.restore();
 	}
-	for (const s of draft) renderStrokeToCtx(getLayerCtx('draft'), s);
-	for (const s of main) renderStrokeToCtx(getLayerCtx('main'), s);
-	recompositeDisplay();
+	// Snapshot the strokes so new ones arriving via WebSocket while we're chunked-
+	// rendering don't get inserted into the iteration mid-stream (they'll be rendered
+	// live by onRemoteStroke instead).
+	const snapshot = strokes.value.slice(bakedCount);
+	const total = snapshot.length;
+	if (total === 0) {
+		recompositeDisplay();
+		return Promise.resolve();
+	}
+	const CHUNK = 12;
+	return new Promise(resolve => {
+		let i = 0;
+		const step = () => {
+			if (myEpoch !== redrawEpoch) { resolve(); return; }
+			const end = Math.min(i + CHUNK, total);
+			for (; i < end; i++) {
+				renderStrokeToCtx(getLayerCtx(resolveStrokeLayer(snapshot[i])), snapshot[i]);
+			}
+			recompositeDisplay();
+			if (i < total) {
+				requestAnimationFrame(step);
+			} else {
+				resolve();
+			}
+		};
+		step();
+	});
 }
 
 function canvasPointToNormalized(ev: PointerEvent): [number, number, number] {
 	const rect = canvasEl.value!.getBoundingClientRect();
-	const x = (ev.clientX - rect.left) / rect.width;
+	// Mirror view flips the canvas display via scaleX(-1). getBoundingClientRect doesn't
+	// account for the transform's inversion of hit-space, so when mirrored we flip x back
+	// into canvas-pixel space. All stroke points are stored in canvas space so redraws
+	// and peer sync remain mirror-independent.
+	let x = (ev.clientX - rect.left) / rect.width;
+	if (mirrorView.value) x = 1 - x;
 	const y = (ev.clientY - rect.top) / rect.height;
 	return [
 		Math.max(0, Math.min(1, x)),
@@ -651,6 +1369,8 @@ function updateBrushCursor(ev: PointerEvent) {
 
 function onCanvasPointerMove(ev: PointerEvent) {
 	updateBrushCursor(ev);
+	const p = canvasPointToNormalized(ev);
+	sendCursor(p[0], p[1]);
 	onPointerMove(ev);
 }
 
@@ -664,51 +1384,161 @@ function onCanvasPointerLeave(ev: PointerEvent) {
 	onPointerUp(ev);
 }
 
+// Stabilizer — average the last (smoothing+1) raw samples to produce the committed point.
+// Returns null if we don't yet have enough samples to emit.
+function consumeStabilized(): [number, number, number] | null {
+	const n = smoothing.value + 1;
+	if (rawBuffer.length < n) return null;
+	const window = rawBuffer.slice(-n);
+	let sx = 0, sy = 0, sp = 0;
+	for (const [x, y, p] of window) { sx += x; sy += y; sp += p; }
+	return [sx / n, sy / n, sp / n];
+}
+
+// Flush remaining raw samples as progressively-narrowing windows so the stroke ends at the
+// user's last real pointer position instead of trailing behind.
+function flushStabilizerTail(): [number, number, number][] {
+	const out: [number, number, number][] = [];
+	let n = smoothing.value + 1;
+	while (n > 1 && rawBuffer.length > 0) {
+		n--;
+		if (rawBuffer.length < n) continue;
+		const window = rawBuffer.slice(-n);
+		let sx = 0, sy = 0, sp = 0;
+		for (const [x, y, p] of window) { sx += x; sy += y; sp += p; }
+		out.push([sx / n, sy / n, sp / n]);
+	}
+	if (rawBuffer.length > 0) out.push(rawBuffer[rawBuffer.length - 1]);
+	return out;
+}
+
+// Read a single pixel from the composited display canvas and return its hex color.
+function pickColorAt(nx: number, ny: number): string | null {
+	const c = getContext();
+	const x = Math.max(0, Math.min(CANVAS_W - 1, Math.floor(nx * CANVAS_W)));
+	const y = Math.max(0, Math.min(CANVAS_H - 1, Math.floor(ny * CANVAS_H)));
+	try {
+		const d = c.getImageData(x, y, 1, 1).data;
+		return rgbToHex(d[0], d[1], d[2]);
+	} catch {
+		return null;
+	}
+}
+
 function onPointerDown(ev: PointerEvent) {
 	if (isDrawingStroke || loading.value) return;
 	ev.preventDefault();
 
+	const point = canvasPointToNormalized(ev);
+
+	// Alt+click on any tool acts as a spoit for one shot.
+	if (tool.value === 'spoit' || ev.altKey) {
+		const picked = pickColorAt(point[0], point[1]);
+		if (picked) applyRecentColor(picked);
+		return;
+	}
+
 	if (tool.value === 'fill') {
-		// Fill always writes to the main layer (operating on main-layer pixels only).
-		const point = canvasPointToNormalized(ev);
+		grabPreStrokeSnapshot(currentLayer.value);
 		const stroke: ChatDrawingStroke = {
 			id: newStrokeId(),
 			points: [[point[0], point[1]]],
-			color: color.value,
+			color: composedColor.value,
 			width: 0,
 			tool: 'fill',
-			layer: 'main',
+			layer: currentLayer.value,
 		};
 		strokes.value.push(stroke);
-		renderStroke(stroke); // targets main ctx then recomposites
+		renderStroke(stroke);
 		props.connection.send('drawStroke', { drawingId: props.drawingId, stroke });
 		myUndoStack.value.push(stroke.id!);
 		myRedoStack.value = [];
+		commitStrokePatch(stroke);
+		maybeBakeOverflow();
+		recordRecentColor(color.value);
 		return;
 	}
 
 	canvasEl.value?.setPointerCapture(ev.pointerId);
 	isDrawingStroke = true;
 	activePointerId = ev.pointerId;
-	currentPoints = [canvasPointToNormalized(ev)];
+	// Snapshot the target layer before the first pixel is touched so undo can restore it
+	// with one putImageData on the stroke's bbox at commit time.
+	grabPreStrokeSnapshot(currentLayer.value);
+
+	if (tool.value === 'line') {
+		lineStart = point;
+		return;
+	}
+
+	rawBuffer = [point];
+	currentPoints = [point];
+	// Paint a single dot immediately so a tap/click leaves a mark even without a move.
+	// By this point tool.value has been narrowed to pen/eraser/paint — fill/spoit/line
+	// all return earlier in this function.
 	renderStroke({
-		points: currentPoints,
-		color: color.value,
+		points: [point],
+		color: composedColor.value,
 		width: width.value / CANVAS_W,
 		tool: tool.value,
 		layer: currentLayer.value,
 	});
 }
 
+function drawLinePreview(start: [number, number, number], end: [number, number, number]) {
+	if (!preStrokeLayerSnapshot) return;
+	const c = getLayerCtx(currentLayer.value);
+	c.putImageData(preStrokeLayerSnapshot, 0, 0);
+	c.save();
+	c.lineCap = 'round';
+	c.lineJoin = 'round';
+	if (tool.value === 'eraser') {
+		c.globalCompositeOperation = 'destination-out';
+		c.strokeStyle = '#000';
+		c.globalAlpha = 1;
+	} else {
+		c.strokeStyle = composedColor.value;
+		c.globalAlpha = 1;
+	}
+	c.lineWidth = Math.max(0.5, width.value);
+	c.beginPath();
+	c.moveTo(start[0] * CANVAS_W, start[1] * CANVAS_H);
+	c.lineTo(end[0] * CANVAS_W, end[1] * CANVAS_H);
+	c.stroke();
+	c.restore();
+	recompositeDisplay();
+}
+
 function onPointerMove(ev: PointerEvent) {
 	if (!isDrawingStroke || ev.pointerId !== activePointerId) return;
 	const p = canvasPointToNormalized(ev);
+
+	if (tool.value === 'line' && lineStart) {
+		// Shift-constrains to 0/45/90°
+		let end = p;
+		if (ev.shiftKey) {
+			const dx = p[0] - lineStart[0];
+			const dy = p[1] - lineStart[1];
+			const ang = Math.atan2(dy, dx);
+			const step = Math.PI / 4;
+			const snapped = Math.round(ang / step) * step;
+			const dist = Math.sqrt(dx * dx + dy * dy);
+			end = [lineStart[0] + Math.cos(snapped) * dist, lineStart[1] + Math.sin(snapped) * dist, p[2]];
+		}
+		drawLinePreview(lineStart, end);
+		return;
+	}
+
+	rawBuffer.push(p);
+	const next = consumeStabilized();
+	if (!next) return;
+
 	const last = currentPoints[currentPoints.length - 1];
-	const dx = (p[0] - last[0]) * CANVAS_W;
-	const dy = (p[1] - last[1]) * CANVAS_H;
+	const dx = (next[0] - last[0]) * CANVAS_W;
+	const dy = (next[1] - last[1]) * CANVAS_H;
 	if (dx * dx + dy * dy < 1) return;
 
-	const avgP = (last[2] + p[2]) / 2;
+	const avgP = (last[2] + next[2]) / 2;
 	const c = getLayerCtx(currentLayer.value);
 	c.save();
 	c.lineCap = 'round';
@@ -718,18 +1548,18 @@ function onPointerMove(ev: PointerEvent) {
 		c.strokeStyle = '#000';
 		c.globalAlpha = 1;
 	} else {
-		c.strokeStyle = color.value;
+		c.strokeStyle = composedColor.value;
 		c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
 	}
 	c.lineWidth = Math.max(0.5, width.value * avgP);
 	c.beginPath();
 	c.moveTo(last[0] * CANVAS_W, last[1] * CANVAS_H);
-	c.lineTo(p[0] * CANVAS_W, p[1] * CANVAS_H);
+	c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
 	c.stroke();
 	c.restore();
 	recompositeDisplay();
 
-	currentPoints.push(p);
+	currentPoints.push(next);
 }
 
 function onPointerUp(ev: PointerEvent) {
@@ -738,14 +1568,93 @@ function onPointerUp(ev: PointerEvent) {
 	activePointerId = null;
 	try { canvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
 
+	if (tool.value === 'line' && lineStart) {
+		const end = canvasPointToNormalized(ev);
+		let finalEnd = end;
+		if (ev.shiftKey) {
+			const dx = end[0] - lineStart[0];
+			const dy = end[1] - lineStart[1];
+			const ang = Math.atan2(dy, dx);
+			const step = Math.PI / 4;
+			const snapped = Math.round(ang / step) * step;
+			const dist = Math.sqrt(dx * dx + dy * dy);
+			finalEnd = [lineStart[0] + Math.cos(snapped) * dist, lineStart[1] + Math.sin(snapped) * dist, end[2]];
+		}
+		// Restore snapshot then commit through the normal stroke path so remote peers render identically.
+		if (preStrokeLayerSnapshot) {
+			const c = getLayerCtx(currentLayer.value);
+			c.putImageData(preStrokeLayerSnapshot, 0, 0);
+			recompositeDisplay();
+		}
+		const stroke: ChatDrawingStroke = {
+			id: newStrokeId(),
+			points: [
+				[lineStart[0], lineStart[1], 1],
+				[finalEnd[0], finalEnd[1], 1],
+			],
+			color: composedColor.value,
+			width: width.value / CANVAS_W,
+			tool: 'pen', // line is committed as a 2-point pen stroke
+			layer: currentLayer.value,
+		};
+		strokes.value.push(stroke);
+		renderStroke(stroke);
+		props.connection.send('drawStroke', { drawingId: props.drawingId, stroke });
+		myUndoStack.value.push(stroke.id!);
+		myRedoStack.value = [];
+		commitStrokePatch(stroke);
+		maybeBakeOverflow();
+		recordRecentColor(color.value);
+		lineStart = null;
+		return;
+	}
+
+	// Flush any un-averaged tail so the visible stroke lands on the actual pointer end.
+	const tail = flushStabilizerTail();
+	for (const next of tail) {
+		const last = currentPoints[currentPoints.length - 1];
+		if (!last) { currentPoints.push(next); continue; }
+		const dx = (next[0] - last[0]) * CANVAS_W;
+		const dy = (next[1] - last[1]) * CANVAS_H;
+		if (dx * dx + dy * dy < 1) continue;
+		const avgP = (last[2] + next[2]) / 2;
+		const c = getLayerCtx(currentLayer.value);
+		c.save();
+		c.lineCap = 'round';
+		c.lineJoin = 'round';
+		if (tool.value === 'eraser') {
+			c.globalCompositeOperation = 'destination-out';
+			c.strokeStyle = '#000';
+			c.globalAlpha = 1;
+		} else {
+			c.strokeStyle = composedColor.value;
+			c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
+		}
+		c.lineWidth = Math.max(0.5, width.value * avgP);
+		c.beginPath();
+		c.moveTo(last[0] * CANVAS_W, last[1] * CANVAS_H);
+		c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
+		c.stroke();
+		c.restore();
+		currentPoints.push(next);
+	}
+	recompositeDisplay();
+	rawBuffer = [];
+
 	if (currentPoints.length === 0) return;
 
+	// tool.value is a ref so TS doesn't narrow across the earlier branches that return
+	// for line/fill/spoit — explicitly coerce to the committable tool set.
+	const commitTool: 'pen' | 'eraser' | 'paint' =
+		tool.value === 'eraser' ? 'eraser' :
+		tool.value === 'paint' ? 'paint' :
+		'pen';
 	const stroke: ChatDrawingStroke = {
 		id: newStrokeId(),
 		points: currentPoints,
-		color: color.value,
+		color: composedColor.value,
 		width: width.value / CANVAS_W,
-		tool: tool.value,
+		tool: commitTool,
 		layer: currentLayer.value,
 	};
 	currentPoints = [];
@@ -754,6 +1663,9 @@ function onPointerUp(ev: PointerEvent) {
 	props.connection.send('drawStroke', { drawingId: props.drawingId, stroke });
 	myUndoStack.value.push(stroke.id!);
 	myRedoStack.value = [];
+	commitStrokePatch(stroke);
+	maybeBakeOverflow();
+	if (tool.value !== 'eraser') recordRecentColor(color.value);
 }
 
 function onRemoteStroke(payload: { userId: string; drawingId: string; stroke: ChatDrawingStroke }) {
@@ -761,11 +1673,13 @@ function onRemoteStroke(payload: { userId: string; drawingId: string; stroke: Ch
 	if (payload.userId === $i.id) return;
 	strokes.value.push(payload.stroke);
 	renderStroke(payload.stroke);
+	maybeBakeOverflow();
 }
 
 function onRemoteClear(payload: { userId: string; drawingId: string }) {
 	if (payload.drawingId !== props.drawingId) return;
 	strokes.value = [];
+	resetBaseline();
 	clearCanvas();
 }
 
@@ -787,7 +1701,11 @@ async function onRemoteDrawingUpdated(payload: { drawingId: string; imageAccessK
 		// someone committed — our in-memory undo/redo history no longer matches the canonical state.
 		myUndoStack.value = [];
 		myRedoStack.value = [];
-		redrawAll();
+		clearStrokePatches();
+		resetBaseline();
+		await redrawAll();
+		// Flatten the replayed state into the baseline so subsequent redraws are cheap.
+		snapshotBaselineFromLive();
 	} catch (err) {
 		console.error('failed to reload drawing', err);
 	}
@@ -795,14 +1713,25 @@ async function onRemoteDrawingUpdated(payload: { drawingId: string; imageAccessK
 
 function clearAll() {
 	strokes.value = [];
+	resetBaseline();
 	clearCanvas();
 	myUndoStack.value = [];
 	myRedoStack.value = [];
+	clearStrokePatches();
 	props.connection.send('drawClear', { drawingId: props.drawingId });
 }
 
+const currentLayerLabel = computed(() => {
+	if (currentLayer.value === 'draft') return '下描きレイヤー';
+	if (currentLayer.value === 'lineart') return '線画レイヤー';
+	return '塗りレイヤー';
+});
+
 function toggleLayer() {
-	currentLayer.value = currentLayer.value === 'draft' ? 'main' : 'draft';
+	// main → 下描き → 線画 → main
+	if (currentLayer.value === 'main') currentLayer.value = 'draft';
+	else if (currentLayer.value === 'draft') currentLayer.value = 'lineart';
+	else currentLayer.value = 'main';
 }
 
 // Re-composite whenever the draft opacity slider moves so the user sees the change live.
@@ -834,17 +1763,35 @@ function removeStrokeById(strokeId: string): ChatDrawingStroke | null {
 function undo() {
 	const id = myUndoStack.value.pop();
 	if (!id) return;
-	const removed = removeStrokeById(id);
-	if (removed) myRedoStack.value.push(removed);
+	const idx = strokes.value.findIndex(s => s.id === id);
+	const removed = idx >= 0 ? strokes.value[idx] : null;
+	const patch = strokePatches.get(id);
+	if (patch && removed) {
+		// Fast path: restore just the stroke's bbox from the pre-stroke snapshot.
+		// O(bbox) instead of O(strokes) — no full redraw.
+		getLayerCtx(patch.layer).putImageData(patch.imageData, patch.x, patch.y);
+		strokes.value.splice(idx, 1);
+		strokePatches.delete(id);
+		recompositeDisplay();
+		myRedoStack.value.push(removed);
+	} else {
+		// Fallback: no patch recorded (evicted past cap or remote-originated) — full redraw.
+		const rm = removeStrokeById(id);
+		if (rm) myRedoStack.value.push(rm);
+	}
 	props.connection.send('drawUndo', { drawingId: props.drawingId, strokeId: id });
 }
 
 function redo() {
 	const stroke = myRedoStack.value.pop();
 	if (!stroke || !stroke.id) return;
+	// Capture the pre-state before re-applying, so the next undo can use the fast path too.
+	grabPreStrokeSnapshot(resolveStrokeLayer(stroke));
 	strokes.value.push(stroke);
 	renderStroke(stroke);
 	myUndoStack.value.push(stroke.id);
+	commitStrokePatch(stroke);
+	maybeBakeOverflow();
 	props.connection.send('drawStroke', { drawingId: props.drawingId, stroke });
 }
 
@@ -852,6 +1799,12 @@ function onRemoteUndo(payload: { userId: string; drawingId: string; strokeId: st
 	if (payload.drawingId !== props.drawingId) return;
 	if (payload.userId === $i.id) return;
 	removeStrokeById(payload.strokeId);
+}
+
+function onRemoteCursor(payload: { drawingId: string; userId: string; x: number; y: number }) {
+	if (payload.drawingId !== props.drawingId) return;
+	if (payload.userId === $i.id) return;
+	remoteCursors.value.set(payload.userId, { x: payload.x, y: payload.y, updatedAt: Date.now() });
 }
 
 function onKeyDown(ev: KeyboardEvent) {
@@ -870,36 +1823,45 @@ function sendPresence() {
 	props.connection.send('drawingPresence', { drawingId: props.drawingId });
 }
 
-async function downloadImage() {
-	if (!canvasEl.value) return;
-	// Export the native 1024×768 display canvas (already composited by recompositeDisplay with
-	// the user's current draft opacity). Zoom is CSS-only so it doesn't affect the PNG.
-	try {
-		const blob = await new Promise<Blob>((resolve, reject) => {
-			canvasEl.value!.toBlob(b => b ? resolve(b) : reject(new Error('toBlob returned null')), 'image/png');
-		});
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		const safeTitle = (title.value || 'drawing').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
-		const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-		a.download = `${safeTitle}-${stamp}.png`;
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		// Release memory on the next tick so Safari has time to start the download.
-		setTimeout(() => URL.revokeObjectURL(url), 0);
-	} catch (err) {
-		console.error(err);
-		os.alert({ type: 'error', text: i18n.ts.somethingHappened });
-	}
+// Render the published composite (white bg + main + lineart, no draft) to a fresh
+// offscreen canvas and return it as a base64-encoded PNG. Used on save to hand the
+// bit-exact image to the server so it can skip the heavy stroke replay.
+async function bakeCompositePngBase64(): Promise<string | null> {
+	ensureLayerCanvases();
+	const out = document.createElement('canvas');
+	out.width = CANVAS_W;
+	out.height = CANVAS_H;
+	const octx = out.getContext('2d');
+	if (!octx) return null;
+	octx.fillStyle = '#ffffff';
+	octx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+	octx.drawImage(mainCanvas, 0, 0);
+	octx.drawImage(lineartCanvas, 0, 0);
+	return await new Promise<string | null>(resolve => {
+		out.toBlob(async b => {
+			if (!b) { resolve(null); return; }
+			const buf = await b.arrayBuffer();
+			const bytes = new Uint8Array(buf);
+			let binary = '';
+			const CHUNK = 0x8000;
+			for (let i = 0; i < bytes.length; i += CHUNK) {
+				binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+			}
+			resolve(btoa(binary));
+		}, 'image/png');
+	});
 }
 
 async function saveAndClose() {
 	if (saving.value) return;
 	saving.value = true;
 	try {
-		await apiChatDrawingUpdate({ drawingId: props.drawingId, strokes: strokes.value });
+		const imageBase64 = await bakeCompositePngBase64();
+		await apiChatDrawingUpdate({
+			drawingId: props.drawingId,
+			strokes: strokes.value,
+			...(imageBase64 ? { imageBase64 } : {}),
+		});
 		close();
 	} catch (err) {
 		console.error(err);
@@ -929,13 +1891,19 @@ onMounted(async () => {
 	props.connection.on('drawingUpdated', onRemoteDrawingUpdated);
 	props.connection.on('drawingPresence', onRemotePresence);
 	props.connection.on('drawUndo', onRemoteUndo);
+	props.connection.on('drawingCursor', onRemoteCursor);
 	window.addEventListener('keydown', onKeyDown);
+	window.addEventListener('mousedown', closeColorPopoverOnOutside);
 
 	try {
 		const fresh = await apiChatDrawingShow(props.drawingId);
 		title.value = fresh.title ?? '';
 		strokes.value = fresh.strokes;
-		redrawAll();
+		resetBaseline();
+		await redrawAll();
+		// Flatten the loaded state into the baseline so any subsequent redraw is O(recent)
+		// instead of re-replaying every stored stroke.
+		snapshotBaselineFromLive();
 	} catch (err) {
 		console.error(err);
 		os.alert({ type: 'error', text: i18n.ts.somethingHappened });
@@ -956,7 +1924,9 @@ onBeforeUnmount(() => {
 	props.connection.off('drawingUpdated', onRemoteDrawingUpdated);
 	props.connection.off('drawingPresence', onRemotePresence);
 	props.connection.off('drawUndo', onRemoteUndo);
+	props.connection.off('drawingCursor', onRemoteCursor);
 	window.removeEventListener('keydown', onKeyDown);
+	window.removeEventListener('mousedown', closeColorPopoverOnOutside);
 	if (presenceInterval) clearInterval(presenceInterval);
 	if (tickInterval) clearInterval(tickInterval);
 	if (resizeObserver) resizeObserver.disconnect();
@@ -981,22 +1951,48 @@ onBeforeUnmount(() => {
 .toolbar {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 12px;
+	gap: 10px;
 	align-items: center;
-	padding: 8px 12px;
+	padding: 6px 12px;
 	background: var(--MI_THEME-panel);
 	border-bottom: solid 1px var(--MI_THEME-divider);
 	flex: 0 0 auto;
 }
 
+.toolbarSecondary {
+	padding-top: 4px;
+	background: color-mix(in srgb, var(--MI_THEME-panel) 92%, transparent);
+}
+
 .toolGroup {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 4px;
+}
+
+.sliderField {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 2px 6px;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--MI_THEME-bg) 55%, transparent);
+}
+
+.sliderIcon {
+	font-size: 0.95em;
+	color: var(--MI_THEME-fgTransparentWeak);
+}
+
+.separator {
+	width: 1px;
+	height: 22px;
+	background: var(--MI_THEME-divider);
+	opacity: 0.6;
 }
 
 .toolLabel {
-	font-size: 0.85em;
+	font-size: 0.82em;
 	color: var(--MI_THEME-fgTransparentWeak);
 }
 
@@ -1027,6 +2023,25 @@ onBeforeUnmount(() => {
 	}
 }
 
+.layerToggle {
+	height: 36px;
+	padding: 0 12px;
+	border-radius: 6px;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	white-space: nowrap;
+
+	&:hover:not(:disabled) {
+		background: var(--MI_THEME-accentedBg);
+	}
+}
+
+.layerToggleLabel {
+	font-size: 0.88em;
+	font-weight: 500;
+}
+
 .colorPicker {
 	width: 36px;
 	height: 28px;
@@ -1041,15 +2056,113 @@ onBeforeUnmount(() => {
 	}
 }
 
+.colorSwatch {
+	width: 36px;
+	height: 28px;
+	border: 1px solid var(--MI_THEME-divider);
+	border-radius: 6px;
+	padding: 2px;
+	background: conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+	cursor: pointer;
+
+	&:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+}
+
+.colorSwatchInner {
+	display: block;
+	width: 100%;
+	height: 100%;
+	border-radius: 4px;
+	background-image:
+		linear-gradient(45deg, #ccc 25%, transparent 25%),
+		linear-gradient(-45deg, #ccc 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, #ccc 75%),
+		linear-gradient(-45deg, transparent 75%, #ccc 75%);
+	background-size: 8px 8px;
+	background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+}
+
+.recentColors {
+	display: flex;
+	gap: 3px;
+	align-items: center;
+	max-width: 180px;
+	overflow: hidden;
+}
+
+.recentColorChip {
+	width: 18px;
+	height: 18px;
+	border-radius: 4px;
+	border: 1px solid var(--MI_THEME-divider);
+	cursor: pointer;
+
+	&:hover:not(:disabled) {
+		transform: scale(1.15);
+	}
+
+	&:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+}
+
+.colorPopover {
+	position: fixed;
+	z-index: 30;
+	background: var(--MI_THEME-panel);
+	border: 1px solid var(--MI_THEME-divider);
+	border-radius: 8px;
+	padding: 10px;
+	box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: 210px;
+}
+
+.wheelCanvas {
+	width: 180px;
+	height: 180px;
+	touch-action: none;
+	align-self: center;
+}
+
+.wheelSliderRow {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.wheelSlider {
+	flex: 1;
+}
+
+.hexInput {
+	flex: 1;
+	min-width: 0;
+	padding: 4px 6px;
+	border: 1px solid var(--MI_THEME-divider);
+	border-radius: 4px;
+	background: var(--MI_THEME-bg);
+	color: var(--MI_THEME-fg);
+	font-family: ui-monospace, monospace;
+	font-size: 0.85em;
+}
+
 .widthSlider {
-	width: 120px;
+	width: 96px;
 }
 
 .widthValue {
-	min-width: 24px;
+	min-width: 22px;
 	text-align: right;
 	font-variant-numeric: tabular-nums;
-	font-size: 0.85em;
+	font-size: 0.8em;
+	color: var(--MI_THEME-fgTransparentWeak);
 }
 
 .spacer {
@@ -1144,6 +2257,39 @@ onBeforeUnmount(() => {
 
 .canvasFillCursor {
 	cursor: crosshair;
+}
+
+.canvasMirrored {
+	transform: scaleX(-1);
+}
+
+.remoteCursor {
+	position: absolute;
+	pointer-events: none;
+	z-index: 15;
+	transform: translate(-6px, -6px);
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	transition: left 0.05s linear, top 0.05s linear;
+}
+
+.remoteCursorAvatar {
+	width: 22px;
+	height: 22px;
+	display: block;
+	border-radius: 50%;
+	border: 2px solid #fff;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.remoteCursorName {
+	background: rgba(0, 0, 0, 0.6);
+	color: #fff;
+	font-size: 0.75em;
+	padding: 1px 6px;
+	border-radius: 10px;
+	white-space: nowrap;
 }
 
 .brushCursor {

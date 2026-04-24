@@ -48,8 +48,9 @@ export class ChatEntityService {
 
 	@bindThis
 	public drawingImageUrl(accessKey: string | null | undefined): string | null {
-		if (!accessKey) return null;
-		return `${this.config.url}/chat-drawings/${accessKey}.png`;
+		// Delegate to ChatDrawingService so the same routing (object storage public URL vs
+		// the legacy /chat-drawings/:key route) applies everywhere the URL is generated.
+		return this.chatDrawingService.publicImageUrl(accessKey ?? null);
 	}
 
 	@bindThis
