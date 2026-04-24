@@ -743,10 +743,12 @@ export class ChatDrawingService {
 
 		const updated = await this.chatDrawingsRepository.findOneByOrFail({ id: drawing.id });
 
+		const publishedImageUrl = this.publicImageUrl(newAccessKey) ?? '';
 		if (updated.roomId != null) {
 			this.globalEventService.publishChatRoomStream(updated.roomId, 'drawingUpdated', {
 				drawingId: updated.id,
 				imageAccessKey: newAccessKey,
+				imageUrl: publishedImageUrl,
 				updatedAt: now.toISOString(),
 				lastEditedById: editor.id,
 			});
@@ -754,6 +756,7 @@ export class ChatDrawingService {
 			const payload = {
 				drawingId: updated.id,
 				imageAccessKey: newAccessKey,
+				imageUrl: publishedImageUrl,
 				updatedAt: now.toISOString(),
 				lastEditedById: editor.id,
 			};

@@ -337,8 +337,12 @@ function onReact(ctx: Parameters<Misskey.Channels['chatUser']['events']['react']
 	}
 }
 
-function onDrawingUpdated(payload: { drawingId: string; imageAccessKey: string; updatedAt: string; lastEditedById: string }) {
-	const imageUrl = `${window.location.origin}/chat-drawings/${payload.imageAccessKey}.png`;
+function onDrawingUpdated(payload: { drawingId: string; imageAccessKey: string; imageUrl?: string; updatedAt: string; lastEditedById: string }) {
+	// Prefer the server-computed URL (which respects object-storage settings). Fall back
+	// to the legacy /chat-drawings/:key.png route only if the payload predates the field.
+	const imageUrl = payload.imageUrl && payload.imageUrl.length > 0
+		? payload.imageUrl
+		: `${window.location.origin}/chat-drawings/${payload.imageAccessKey}.png`;
 	for (const m of messages.value) {
 		if (m.drawing && m.drawing.id === payload.drawingId) {
 			m.drawing.imageUrl = imageUrl;

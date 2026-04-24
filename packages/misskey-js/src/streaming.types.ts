@@ -271,6 +271,7 @@ export type Channels = {
 			drawingUpdated: (payload: {
 				drawingId: string;
 				imageAccessKey: string;
+				imageUrl: string;
 				updatedAt: string;
 				lastEditedById: User['id'];
 			}) => void;
@@ -345,6 +346,7 @@ export type Channels = {
 			drawingUpdated: (payload: {
 				drawingId: string;
 				imageAccessKey: string;
+				imageUrl: string;
 				updatedAt: string;
 				lastEditedById: User['id'];
 			}) => void;

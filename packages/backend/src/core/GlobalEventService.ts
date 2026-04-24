@@ -195,6 +195,9 @@ export interface ChatEventTypes {
 	drawingUpdated: {
 		drawingId: string;
 		imageAccessKey: string;
+		// Full public URL resolved server-side — respects object-storage settings so clients
+		// don't have to reconstruct the URL locally (where they don't know whether R2 is on).
+		imageUrl: string;
 		updatedAt: string;
 		lastEditedById: MiUser['id'];
 	};
