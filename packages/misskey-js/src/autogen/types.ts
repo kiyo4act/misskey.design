@@ -16830,6 +16830,7 @@ export interface operations {
                     /** Format: misskey:id */
                     drawingId: string;
                     strokes: Record<string, never>[];
+                    imageBase64?: string | null;
                 };
             };
         };
