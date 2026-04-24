@@ -57,6 +57,15 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<i class="ti ti-link"></i>
 			</button>
 
+			<button
+				class="_button"
+				:class="[$style.toolButton, pressureSensitivity ? $style.toolActive : null]"
+				:title="pressureSensitivity ? '筆圧検知: ON（クリックで OFF）' : '筆圧検知: OFF（クリックで ON）'"
+				@click="pressureSensitivity = !pressureSensitivity"
+			>
+				<i :class="['ti', pressureSensitivity ? 'ti-writing' : 'ti-writing-off']"></i>
+			</button>
+
 
 			<div :class="$style.spacer"></div>
 
@@ -137,11 +146,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 				@pointermove="onWheelPointerMove"
 				@pointerup="onWheelPointerUp"
 			></canvas>
-			<div :class="$style.wheelSliderRow">
-				<span :class="$style.toolLabel" style="width: 14px;">V</span>
-				<input v-model.number="hsvV" type="range" min="0" max="1" step="0.01" :class="$style.wheelSlider"/>
-				<span :class="$style.widthValue">{{ Math.round(hsvV * 100) }}</span>
-			</div>
 			<div :class="$style.wheelSliderRow">
 				<span :class="$style.toolLabel" style="width: 14px;">#</span>
 				<input v-model="hexInput" type="text" maxlength="9" :class="$style.hexInput" @change="onHexInputCommit"/>
@@ -305,6 +309,10 @@ const eraserWidth = ref<number>(20);
 // "Lineart clip" mode — when on, pen/paint/line strokes go to the lineart layer with
 // `source-atop`, so they only recolor existing line pixels rather than painting new ones.
 const lineartClipEnabled = ref<boolean>(false);
+// Pen-tablet pressure sensitivity. Off forces every stroke to constant full pressure
+// (uniform line width / opacity), useful when tablet drivers jitter or the user just
+// wants even strokes.
+const pressureSensitivity = ref<boolean>(true);
 
 // Active brush width per tool. The toolbar "太さ" slider binds to this so each tool
 // keeps its own last-set size.
@@ -365,7 +373,13 @@ const hexInput = ref<string>('#222222ff');
 const colorPopoverOpen = ref<boolean>(false);
 const colorSwatchEl = useTemplateRef('colorSwatchEl');
 const wheelCanvasEl = useTemplateRef('wheelCanvasEl');
-const WHEEL_SIZE = 180;
+const WHEEL_SIZE = 200;
+// Geometry for the hue-ring + SV-square picker.
+const WHEEL_RING_OUTER = WHEEL_SIZE / 2 - 2;   // outermost radius of the hue ring
+const WHEEL_RING_INNER = WHEEL_SIZE / 2 - 26;  // inner radius of the hue ring (ring thickness = 24px)
+// Inscribed square inside the inner circle. side = inner_radius * √2, but shrink a hair
+// so the square doesn't visually touch the ring.
+const WHEEL_SQUARE_SIDE = Math.floor((WHEEL_RING_INNER - 4) * Math.SQRT2);
 const colorPopoverStyle = ref<{ top: string; left: string }>({ top: '0px', left: '0px' });
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -437,55 +451,91 @@ function onHexInputCommit() {
 	hsvH.value = h; hsvS.value = s; hsvV.value = v;
 }
 
+// Illustration-software style picker: outer HUE RING (radial rainbow) + inner SV SQUARE
+// (saturation horizontal, value vertical, at the currently-selected hue). Clicking the
+// ring changes hue; the square's fill re-renders accordingly. Clicking the square picks
+// saturation + value.
 function drawWheel() {
 	const cv = wheelCanvasEl.value;
 	if (!cv) return;
 	const wctx = cv.getContext('2d');
 	if (!wctx) return;
 	const size = WHEEL_SIZE;
-	const cx = size / 2, cy = size / 2, r = size / 2 - 2;
+	const cx = size / 2, cy = size / 2;
+	const rOuter = WHEEL_RING_OUTER;
+	const rInner = WHEEL_RING_INNER;
+	const side = WHEEL_SQUARE_SIDE;
+	const sqLeft = Math.floor(cx - side / 2);
+	const sqTop = Math.floor(cy - side / 2);
+	const sqRight = sqLeft + side;
+	const sqBottom = sqTop + side;
 	const img = wctx.createImageData(size, size);
 	const data = img.data;
-	const v = hsvV.value;
+	const h = hsvH.value;
+
 	for (let y = 0; y < size; y++) {
 		for (let x = 0; x < size; x++) {
-			const dx = x - cx, dy = y - cy;
-			const dist = Math.sqrt(dx * dx + dy * dy);
 			const idx = (y * size + x) * 4;
-			if (dist > r) {
-				data[idx + 3] = 0;
+			const dx = x - cx;
+			const dy = y - cy;
+			const dist = Math.sqrt(dx * dx + dy * dy);
+			// Hue ring: annulus between rInner+1 and rOuter.
+			if (dist >= rInner && dist <= rOuter) {
+				let angle = Math.atan2(dy, dx);
+				if (angle < 0) angle += Math.PI * 2;
+				const hue = angle / (Math.PI * 2);
+				const [rr, gg, bb] = hsvToRgb(hue, 1, 1);
+				data[idx] = rr | 0;
+				data[idx + 1] = gg | 0;
+				data[idx + 2] = bb | 0;
+				// 1-px AA at both rims.
+				const edgeOuter = rOuter - dist;
+				const edgeInner = dist - rInner;
+				const a = Math.min(1, Math.max(0, Math.min(edgeOuter, edgeInner)));
+				data[idx + 3] = Math.round(255 * a);
 				continue;
 			}
-			let angle = Math.atan2(dy, dx);
-			if (angle < 0) angle += Math.PI * 2;
-			const h = angle / (Math.PI * 2);
-			const s = Math.min(1, dist / r);
-			const [rr, gg, bb] = hsvToRgb(h, s, v);
-			data[idx] = rr | 0;
-			data[idx + 1] = gg | 0;
-			data[idx + 2] = bb | 0;
-			// Simple AA at the rim: fade alpha in the outermost ~1px.
-			data[idx + 3] = dist > r - 1 ? Math.round(255 * (r - dist)) : 255;
+			// SV square: saturation horizontal, value vertical (1 at top → 0 at bottom).
+			if (x >= sqLeft && x < sqRight && y >= sqTop && y < sqBottom) {
+				const s = (x - sqLeft) / (side - 1);
+				const v = 1 - (y - sqTop) / (side - 1);
+				const [rr, gg, bb] = hsvToRgb(h, s, v);
+				data[idx] = rr | 0;
+				data[idx + 1] = gg | 0;
+				data[idx + 2] = bb | 0;
+				data[idx + 3] = 255;
+				continue;
+			}
+			data[idx + 3] = 0;
 		}
 	}
 	wctx.putImageData(img, 0, 0);
-	// Overlay current-selection ring
-	const selAngle = hsvH.value * Math.PI * 2;
-	const selR = hsvS.value * (r - 2);
-	const selX = cx + Math.cos(selAngle) * selR;
-	const selY = cy + Math.sin(selAngle) * selR;
-	wctx.save();
-	wctx.strokeStyle = '#000';
-	wctx.lineWidth = 2;
-	wctx.beginPath();
-	wctx.arc(selX, selY, 6, 0, Math.PI * 2);
-	wctx.stroke();
-	wctx.strokeStyle = '#fff';
-	wctx.lineWidth = 1;
-	wctx.beginPath();
-	wctx.arc(selX, selY, 6, 0, Math.PI * 2);
-	wctx.stroke();
-	wctx.restore();
+
+	// Selection indicators — black outer ring + white inner ring for contrast on any colour.
+	const drawMarker = (x: number, y: number, radius: number) => {
+		wctx.save();
+		wctx.strokeStyle = '#000';
+		wctx.lineWidth = 2;
+		wctx.beginPath();
+		wctx.arc(x, y, radius, 0, Math.PI * 2);
+		wctx.stroke();
+		wctx.strokeStyle = '#fff';
+		wctx.lineWidth = 1;
+		wctx.beginPath();
+		wctx.arc(x, y, radius, 0, Math.PI * 2);
+		wctx.stroke();
+		wctx.restore();
+	};
+
+	// Hue marker on the ring at the current H.
+	const hueAngle = hsvH.value * Math.PI * 2;
+	const midR = (rOuter + rInner) / 2;
+	drawMarker(cx + Math.cos(hueAngle) * midR, cy + Math.sin(hueAngle) * midR, 6);
+
+	// SV marker inside the square at the current S/V.
+	const svX = sqLeft + hsvS.value * (side - 1);
+	const svY = sqTop + (1 - hsvV.value) * (side - 1);
+	drawMarker(svX, svY, 5);
 }
 
 // Repaint the wheel when V changes or when the popover opens (canvas starts blank).
@@ -496,35 +546,69 @@ watch([hsvV, hsvH, hsvS, colorPopoverOpen], () => {
 	}
 });
 
-let wheelDragging = false;
-function onWheelPointerDown(ev: PointerEvent) {
-	wheelDragging = true;
-	wheelCanvasEl.value?.setPointerCapture(ev.pointerId);
-	applyWheelPick(ev);
+// Pointer dragging on the picker is locked into one of two modes from the initial press.
+// Prevents dragging off the ring into the square (or vice versa) from changing what's
+// being edited mid-drag — classic illustration-software behaviour.
+let wheelDragMode: 'ring' | 'square' | null = null;
+
+function hitTestWheel(ev: PointerEvent): 'ring' | 'square' | null {
+	const cv = wheelCanvasEl.value;
+	if (!cv) return null;
+	const rect = cv.getBoundingClientRect();
+	// Pointer may be at a CSS-scaled rect; normalise back to the intrinsic canvas coords.
+	const scaleX = WHEEL_SIZE / rect.width;
+	const scaleY = WHEEL_SIZE / rect.height;
+	const px = (ev.clientX - rect.left) * scaleX;
+	const py = (ev.clientY - rect.top) * scaleY;
+	const cx = WHEEL_SIZE / 2;
+	const cy = WHEEL_SIZE / 2;
+	const dist = Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
+	if (dist >= WHEEL_RING_INNER && dist <= WHEEL_RING_OUTER) return 'ring';
+	const side = WHEEL_SQUARE_SIDE;
+	const sqLeft = Math.floor(cx - side / 2);
+	const sqTop = Math.floor(cy - side / 2);
+	if (px >= sqLeft && px < sqLeft + side && py >= sqTop && py < sqTop + side) return 'square';
+	return null;
 }
-function onWheelPointerMove(ev: PointerEvent) {
-	if (!wheelDragging) return;
-	applyWheelPick(ev);
-}
-function onWheelPointerUp(ev: PointerEvent) {
-	if (!wheelDragging) return;
-	wheelDragging = false;
-	try { wheelCanvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
-}
-function applyWheelPick(ev: PointerEvent) {
+
+function applyWheelPick(ev: PointerEvent, mode: 'ring' | 'square') {
 	const cv = wheelCanvasEl.value;
 	if (!cv) return;
 	const rect = cv.getBoundingClientRect();
-	const x = ev.clientX - rect.left;
-	const y = ev.clientY - rect.top;
-	const cx = rect.width / 2, cy = rect.height / 2;
-	const dx = x - cx, dy = y - cy;
-	const r = rect.width / 2 - 2;
-	const dist = Math.sqrt(dx * dx + dy * dy);
-	let angle = Math.atan2(dy, dx);
-	if (angle < 0) angle += Math.PI * 2;
-	hsvH.value = angle / (Math.PI * 2);
-	hsvS.value = Math.max(0, Math.min(1, dist / r));
+	const scaleX = WHEEL_SIZE / rect.width;
+	const scaleY = WHEEL_SIZE / rect.height;
+	const px = (ev.clientX - rect.left) * scaleX;
+	const py = (ev.clientY - rect.top) * scaleY;
+	const cx = WHEEL_SIZE / 2;
+	const cy = WHEEL_SIZE / 2;
+	if (mode === 'ring') {
+		let angle = Math.atan2(py - cy, px - cx);
+		if (angle < 0) angle += Math.PI * 2;
+		hsvH.value = angle / (Math.PI * 2);
+	} else {
+		const side = WHEEL_SQUARE_SIDE;
+		const sqLeft = Math.floor(cx - side / 2);
+		const sqTop = Math.floor(cy - side / 2);
+		hsvS.value = Math.max(0, Math.min(1, (px - sqLeft) / (side - 1)));
+		hsvV.value = Math.max(0, Math.min(1, 1 - (py - sqTop) / (side - 1)));
+	}
+}
+
+function onWheelPointerDown(ev: PointerEvent) {
+	const mode = hitTestWheel(ev);
+	if (!mode) return;
+	wheelDragMode = mode;
+	wheelCanvasEl.value?.setPointerCapture(ev.pointerId);
+	applyWheelPick(ev, mode);
+}
+function onWheelPointerMove(ev: PointerEvent) {
+	if (!wheelDragMode) return;
+	applyWheelPick(ev, wheelDragMode);
+}
+function onWheelPointerUp(ev: PointerEvent) {
+	if (!wheelDragMode) return;
+	wheelDragMode = null;
+	try { wheelCanvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
 }
 
 function toggleColorPopover() {
@@ -726,7 +810,11 @@ let lineStart: [number, number, number] | null = null;
 function pressureFromEvent(ev: PointerEvent): number {
 	// Only honour actual pen-tablet pressure. Mouse reports a constant 0.5 while the
 	// button is down, and touch input is inconsistent across devices — treat both as full pressure.
-	if (ev.pointerType === 'pen') return Math.max(0, Math.min(1, ev.pressure || 0));
+	// Can be globally disabled via the toolbar toggle to force constant full pressure
+	// (helps when tablet drivers report noisy pressure or the user just wants even strokes).
+	if (pressureSensitivity.value && ev.pointerType === 'pen') {
+		return Math.max(0, Math.min(1, ev.pressure || 0));
+	}
 	return 1;
 }
 
@@ -2201,10 +2289,13 @@ onBeforeUnmount(() => {
 }
 
 .wheelCanvas {
-	width: 180px;
-	height: 180px;
+	width: 200px;
+	height: 200px;
 	touch-action: none;
 	align-self: center;
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none;
 }
 
 .wheelSliderRow {
