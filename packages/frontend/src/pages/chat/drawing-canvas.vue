@@ -799,6 +799,11 @@ function sendCursor(x: number, y: number) {
 let ctx: CanvasRenderingContext2D | null = null;
 let isDrawingStroke = false;
 let activePointerId: number | null = null;
+// Remote events (drawingUpdated / drawUndo) that arrive mid-stroke would otherwise
+// call redrawAll() and blit the baseline over the live canvas, wiping out the
+// user's uncommitted partial stroke pixels. We defer the redraw until pointerUp.
+let pendingRemoteRedraw = false;
+let pendingRefetchDrawingId: string | null = null;
 // currentPoints: committed, already drawn (stabilized) trailing path
 let currentPoints: [number, number, number][] = [];
 // rawBuffer: recent raw pointer samples used to compute the moving-average "smoothed" head
@@ -1749,6 +1754,7 @@ function onPointerUp(ev: PointerEvent) {
 		maybeBakeOverflow();
 		recordRecentColor(color.value);
 		lineStart = null;
+		if (pendingRemoteRedraw) void flushPendingRedraw();
 		return;
 	}
 
@@ -1788,7 +1794,10 @@ function onPointerUp(ev: PointerEvent) {
 	recompositeDisplay();
 	rawBuffer = [];
 
-	if (currentPoints.length === 0) return;
+	if (currentPoints.length === 0) {
+		if (pendingRemoteRedraw) void flushPendingRedraw();
+		return;
+	}
 
 	// tool.value is a ref so TS doesn't narrow across the earlier branches that return
 	// for line/fill/spoit — explicitly coerce to the committable tool set.
@@ -1816,6 +1825,10 @@ function onPointerUp(ev: PointerEvent) {
 	commitStrokePatch(stroke);
 	maybeBakeOverflow();
 	if (tool.value !== 'eraser') recordRecentColor(color.value);
+
+	// If remote events (drawingUpdated / drawUndo) arrived mid-stroke, their
+	// redraws were deferred so they wouldn't wipe our live pixels. Apply now.
+	if (pendingRemoteRedraw) void flushPendingRedraw();
 }
 
 function onRemoteStroke(payload: { userId: string; drawingId: string; stroke: ChatDrawingStroke }) {
@@ -1842,11 +1855,9 @@ function onRemotePresence(payload: { drawingId: string; userId: string; user: Mi
 	});
 }
 
-async function onRemoteDrawingUpdated(payload: { drawingId: string; imageAccessKey: string; updatedAt: string; lastEditedById: string }) {
-	if (payload.drawingId !== props.drawingId) return;
-	if (payload.lastEditedById === $i.id) return;
+async function applyRemoteDrawingUpdate(drawingId: string) {
 	try {
-		const fresh = await apiChatDrawingShow(payload.drawingId);
+		const fresh = await apiChatDrawingShow(drawingId);
 		strokes.value = fresh.strokes;
 		// someone committed — our in-memory undo/redo history no longer matches the canonical state.
 		myUndoStack.value = [];
@@ -1858,6 +1869,30 @@ async function onRemoteDrawingUpdated(payload: { drawingId: string; imageAccessK
 		snapshotBaselineFromLive();
 	} catch (err) {
 		console.error('failed to reload drawing', err);
+	}
+}
+
+async function onRemoteDrawingUpdated(payload: { drawingId: string; imageAccessKey: string; updatedAt: string; lastEditedById: string }) {
+	if (payload.drawingId !== props.drawingId) return;
+	if (payload.lastEditedById === $i.id) return;
+	if (isDrawingStroke) {
+		// Defer until pointerUp so the in-flight stroke's live-canvas pixels aren't wiped.
+		pendingRemoteRedraw = true;
+		pendingRefetchDrawingId = payload.drawingId;
+		return;
+	}
+	await applyRemoteDrawingUpdate(payload.drawingId);
+}
+
+async function flushPendingRedraw() {
+	if (!pendingRemoteRedraw) return;
+	pendingRemoteRedraw = false;
+	const refetchId = pendingRefetchDrawingId;
+	pendingRefetchDrawingId = null;
+	if (refetchId) {
+		await applyRemoteDrawingUpdate(refetchId);
+	} else {
+		await redrawAll();
 	}
 }
 
@@ -1948,6 +1983,14 @@ function redo() {
 function onRemoteUndo(payload: { userId: string; drawingId: string; strokeId: string }) {
 	if (payload.drawingId !== props.drawingId) return;
 	if (payload.userId === $i.id) return;
+	if (isDrawingStroke) {
+		// Remove from the canonical array now, but defer the canvas redraw until pointerUp
+		// so the in-flight stroke's live-canvas pixels aren't wiped by a baseline blit.
+		const idx = strokes.value.findIndex((s: ChatDrawingStroke) => s.id === payload.strokeId);
+		if (idx >= 0) strokes.value.splice(idx, 1);
+		pendingRemoteRedraw = true;
+		return;
+	}
 	removeStrokeById(payload.strokeId);
 }
 
