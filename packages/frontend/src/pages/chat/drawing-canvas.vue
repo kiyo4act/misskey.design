@@ -29,6 +29,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<button class="_button" :class="[$style.toolButton, tool === 'eraser' ? $style.toolActive : null]" title="消しゴム" @click="tool = 'eraser'"><i class="ti ti-eraser"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'fill' ? $style.toolActive : null]" title="塗りつぶし" @click="tool = 'fill'"><i class="ti ti-paint"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'spoit' ? $style.toolActive : null]" title="スポイト (Alt+クリック)" @click="tool = 'spoit'"><i class="ti ti-color-picker"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'hand' ? $style.toolActive : null]" title="手のひら (ドラッグ移動 / Shift+ドラッグ回転 / ホイールでズーム)" @click="tool = 'hand'"><i class="ti ti-hand-stop"></i></button>
 			</div>
 
 			<div :class="$style.separator"></div>
@@ -131,8 +132,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 			<div :class="$style.toolGroup">
 				<button class="_button" :class="$style.toolButton" :disabled="zoom <= MIN_ZOOM" title="縮小 (Ctrl+ホイール)" @click="zoomOut"><i class="ti ti-zoom-out"></i></button>
-				<button class="_button" :class="[$style.toolButton, $style.zoomLabel]" title="100%に戻す" @click="zoomReset">{{ Math.round(zoom * 100) }}%</button>
+				<button class="_button" :class="[$style.toolButton, $style.zoomLabel]" title="表示をリセット (100% / 中央 / 回転0°)" @click="zoomReset">{{ Math.round(zoom * 100) }}%</button>
 				<button class="_button" :class="$style.toolButton" :disabled="zoom >= MAX_ZOOM" title="拡大 (Ctrl+ホイール)" @click="zoomIn"><i class="ti ti-zoom-in"></i></button>
+				<button class="_button" :class="$style.toolButton" :disabled="rotation === 0" title="回転リセット" @click="rotation = 0"><i class="ti ti-rotate-clockwise"></i></button>
 				<button class="_button" :class="[$style.toolButton, mirrorView ? $style.toolActive : null]" title="左右反転ビュー（表示のみ）" @click="mirrorView = !mirrorView"><i class="ti ti-flip-horizontal"></i></button>
 			</div>
 		</div>
@@ -165,10 +167,17 @@ SPDX-License-Identifier: AGPL-3.0-only
 			</div>
 
 			<div ref="canvasContainerEl" :class="$style.canvasScroll" @wheel="onWheel">
-				<div :class="$style.canvasWrap" :style="{ minWidth: '100%', minHeight: '100%' }">
+				<div :class="$style.canvasWrap" :style="canvasWrapStyle">
 					<canvas
 						ref="canvasEl"
-						:class="[$style.canvas, (tool === 'fill' || tool === 'spoit') ? $style.canvasFillCursor : (tool === 'text' ? $style.canvasTextCursor : $style.canvasBrushCursor), mirrorView ? $style.canvasMirrored : null]"
+						:class="[
+							$style.canvas,
+							tool === 'hand' ? (panActive ? $style.canvasGrabbingCursor : $style.canvasGrabCursor) :
+							(tool === 'fill' || tool === 'spoit') ? $style.canvasFillCursor :
+							tool === 'text' ? $style.canvasTextCursor :
+							$style.canvasBrushCursor,
+							mirrorView ? $style.canvasMirrored : null,
+						]"
 						:width="CANVAS_W"
 						:height="CANVAS_H"
 						:style="canvasDisplayStyle"
@@ -197,7 +206,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 			<!-- Circular brush cursor overlay — positioned against canvasArea so it stays fixed when scrolling -->
 			<div
-				v-show="cursorVisible && tool !== 'fill' && tool !== 'spoit' && tool !== 'text'"
+				v-show="cursorVisible && tool !== 'fill' && tool !== 'spoit' && tool !== 'text' && tool !== 'hand'"
 				:class="$style.brushCursor"
 				:style="cursorStyle"
 			></div>
@@ -274,7 +283,19 @@ const cursorStyle = ref<{ left: string; top: string; width: string; height: stri
 
 // UI tools include client-only 'line' (commits as a 2-point pen stroke on pointer up)
 // and 'spoit' (eyedropper — never commits a stroke, just sets color from the pixel picked).
-const tool = ref<'pen' | 'eraser' | 'fill' | 'paint' | 'line' | 'spoit' | 'watercolor' | 'text'>('pen');
+const tool = ref<'pen' | 'eraser' | 'fill' | 'paint' | 'line' | 'spoit' | 'watercolor' | 'text' | 'hand'>('pen');
+
+// View rotation in degrees, applied to canvasWrap (canvas + textarea overlay rotate as a
+// unit). Drawing-tool inverse-mapping uses this in canvasPointToNormalized so strokes still
+// land at correct pixel coords even when the user has rotated the view.
+const rotation = ref<number>(0);
+
+// Translation offset in CSS pixels applied to canvasWrap on top of its centered layout.
+// Drives the hand tool's pan-with-drag — values can exceed the viewport so the canvas can
+// freely scroll off-screen, and the cursor-focused zoom math also writes here to keep the
+// hovered point fixed under the pointer.
+const panX = ref<number>(0);
+const panY = ref<number>(0);
 
 // Text tool state. Two phases:
 //   - follow: textarea is a ghost preview that tracks the pointer; pointer-events: none on
@@ -1624,14 +1645,42 @@ function redrawAll(): Promise<void> {
 }
 
 function canvasPointToNormalized(ev: PointerEvent): [number, number, number] {
-	const rect = canvasEl.value!.getBoundingClientRect();
-	// Mirror view flips the canvas display via scaleX(-1). getBoundingClientRect doesn't
-	// account for the transform's inversion of hit-space, so when mirrored we flip x back
-	// into canvas-pixel space. All stroke points are stored in canvas space so redraws
-	// and peer sync remain mirror-independent.
-	let x = (ev.clientX - rect.left) / rect.width;
+	const el = canvasEl.value;
+	if (!el) return [0, 0, pressureFromEvent(ev)];
+	const rect = el.getBoundingClientRect();
+	// Cursor delta from the canvas centre. Rotation pivots at canvasWrap centre, which
+	// equals canvas centre because flex centres the canvas in the wrap, and rotation
+	// preserves the AABB centre — so rect's centre is still the canvas centre on screen.
+	const cx = (rect.left + rect.right) / 2;
+	const cy = (rect.top + rect.bottom) / 2;
+	let dx = ev.clientX - cx;
+	let dy = ev.clientY - cy;
+	// Inverse-rotate to recover the un-rotated canvas frame so strokes land at correct
+	// pixel coords regardless of the view rotation.
+	if (rotation.value !== 0) {
+		const r = -rotation.value * Math.PI / 180;
+		const cos = Math.cos(r);
+		const sin = Math.sin(r);
+		const rx = dx * cos - dy * sin;
+		const ry = dx * sin + dy * cos;
+		dx = rx;
+		dy = ry;
+	}
+	// Un-rotated CSS dimensions of the canvas. rect.width/height reflects the rotated AABB
+	// so we recompute from the layout formula.
+	const cw = containerSize.value.w;
+	const ch = containerSize.value.h;
+	const ratio = CANVAS_W / CANVAS_H;
+	const baseW = Math.min(cw, ch * ratio);
+	const baseH = baseW / ratio;
+	const elemW = baseW * zoom.value;
+	const elemH = baseH * zoom.value;
+	if (elemW <= 0 || elemH <= 0) return [0, 0, pressureFromEvent(ev)];
+	let x = (dx + elemW / 2) / elemW;
+	// Mirror view (scaleX(-1) on canvas) inverts hit-space along x; flip back into stored
+	// canvas-pixel space so strokes/peer sync stay mirror-independent.
 	if (mirrorView.value) x = 1 - x;
-	const y = (ev.clientY - rect.top) / rect.height;
+	const y = (dy + elemH / 2) / elemH;
 	return [
 		Math.max(0, Math.min(1, x)),
 		Math.max(0, Math.min(1, y)),
@@ -1642,6 +1691,20 @@ function canvasPointToNormalized(ev: PointerEvent): [number, number, number] {
 // Container-size tracking for zoom-aware canvas display sizing.
 const containerSize = ref({ w: 0, h: 0 });
 let resizeObserver: ResizeObserver | null = null;
+
+// canvasWrap is absolutely positioned at the container centre (left/top: 50%) and offset by
+// translate(-50%, -50%) in its base transform so the canvas natural-rests in the middle.
+// The user-driven pan/rotate transforms are appended after — pan applies in screen-space
+// (no rotation of the delta) so the canvas tracks the pointer 1:1 even when rotated.
+const canvasWrapStyle = computed(() => {
+	const transforms = ['translate(-50%, -50%)'];
+	if (panX.value !== 0 || panY.value !== 0) transforms.push(`translate(${panX.value}px, ${panY.value}px)`);
+	if (rotation.value !== 0) transforms.push(`rotate(${rotation.value}deg)`);
+	return { transform: transforms.join(' ') };
+});
+
+// Tracks whether the hand tool is mid-drag so the cursor flips to "grabbing".
+const panActive = ref<boolean>(false);
 
 const canvasDisplayStyle = computed(() => {
 	const cw = containerSize.value.w;
@@ -1683,13 +1746,11 @@ const textBoxStyle = computed(() => {
 	const baseH = baseW / ratio;
 	const w = baseW * zoom.value;
 	const h = baseH * zoom.value;
-	const wrapW = Math.max(w, cw);
-	const wrapH = Math.max(h, ch);
-	const offX = (wrapW - w) / 2;
-	const offY = (wrapH - h) / 2;
+	// canvasWrap is now exactly canvas-sized (absolutely centred + transformed), so the
+	// textarea is positioned in pure canvas-local CSS coords with no extra wrap padding.
 	const displayScale = w / CANVAS_W;
-	const px = (mirrorView.value ? (1 - textCursor.value.x) : textCursor.value.x) * w + offX;
-	const py = textCursor.value.y * h + offY;
+	const px = (mirrorView.value ? (1 - textCursor.value.x) : textCursor.value.x) * w;
+	const py = textCursor.value.y * h;
 	const fontPxCanvas = activeBrushWidth.value;
 	const fontPxCSS = fontPxCanvas * displayScale;
 	const lineHeightCSS = fontPxCSS * 1.4;
@@ -1740,6 +1801,10 @@ function updateBrushCursor(ev: PointerEvent) {
 }
 
 function onCanvasPointerMove(ev: PointerEvent) {
+	if (panState) {
+		updateHandDrag(ev);
+		return;
+	}
 	updateBrushCursor(ev);
 	const p = canvasPointToNormalized(ev);
 	sendCursor(p[0], p[1]);
@@ -1845,12 +1910,75 @@ function pickColorAt(nx: number, ny: number): string | null {
 	}
 }
 
+// Hand-tool drag session. mode = 'pan' (default) or 'rotate' (held-shift at start). The
+// mode is captured at pointerdown so releasing/pressing shift mid-drag doesn't switch.
+let panState: null | {
+	pointerId: number;
+	mode: 'pan' | 'rotate';
+	startClientX: number;
+	startClientY: number;
+	startPanX: number;
+	startPanY: number;
+	startRotation: number;
+	pivotX: number;
+	pivotY: number;
+	startAngle: number;
+} = null;
+
+function startHandDrag(ev: PointerEvent) {
+	const c = canvasEl.value;
+	if (!c) return;
+	const rect = c.getBoundingClientRect();
+	const pivotX = (rect.left + rect.right) / 2;
+	const pivotY = (rect.top + rect.bottom) / 2;
+	panState = {
+		pointerId: ev.pointerId,
+		mode: ev.shiftKey ? 'rotate' : 'pan',
+		startClientX: ev.clientX,
+		startClientY: ev.clientY,
+		startPanX: panX.value,
+		startPanY: panY.value,
+		startRotation: rotation.value,
+		pivotX,
+		pivotY,
+		startAngle: Math.atan2(ev.clientY - pivotY, ev.clientX - pivotX),
+	};
+	panActive.value = true;
+	c.setPointerCapture(ev.pointerId);
+}
+
+function updateHandDrag(ev: PointerEvent) {
+	if (!panState || ev.pointerId !== panState.pointerId) return;
+	if (panState.mode === 'rotate') {
+		const ang = Math.atan2(ev.clientY - panState.pivotY, ev.clientX - panState.pivotX);
+		const deltaDeg = (ang - panState.startAngle) * 180 / Math.PI;
+		rotation.value = panState.startRotation + deltaDeg;
+		return;
+	}
+	// Pan: drag delta is applied 1:1 in screen-space — the canvas tracks the pointer
+	// regardless of rotation, and there's no clamping so it can go off-viewport.
+	panX.value = panState.startPanX + (ev.clientX - panState.startClientX);
+	panY.value = panState.startPanY + (ev.clientY - panState.startClientY);
+}
+
+function endHandDrag(ev: PointerEvent) {
+	if (!panState || ev.pointerId !== panState.pointerId) return;
+	try { canvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
+	panState = null;
+	panActive.value = false;
+}
+
 function onPointerDown(ev: PointerEvent) {
 	if (isDrawingStroke || loading.value) return;
 	ev.preventDefault();
 	// iPadOS may have started a system selection (rectangle/loupe) on a prior double-tap;
 	// clear it so it doesn't linger over the canvas while drawing.
 	window.getSelection()?.removeAllRanges();
+
+	if (tool.value === 'hand') {
+		startHandDrag(ev);
+		return;
+	}
 
 	const point = canvasPointToNormalized(ev);
 
@@ -2024,6 +2152,10 @@ function onPointerMove(ev: PointerEvent) {
 }
 
 function onPointerUp(ev: PointerEvent) {
+	if (panState && ev.pointerId === panState.pointerId) {
+		endHandDrag(ev);
+		return;
+	}
 	if (!isDrawingStroke || ev.pointerId !== activePointerId) return;
 	isDrawingStroke = false;
 	activePointerId = null;
@@ -2256,7 +2388,14 @@ function clampZoom(z: number): number {
 
 function zoomIn() { zoom.value = clampZoom(zoom.value * 1.25); }
 function zoomOut() { zoom.value = clampZoom(zoom.value / 1.25); }
-function zoomReset() { zoom.value = 1; }
+// Treat the % label as a "reset view" — also recentre and unrotate so a user who got lost
+// (panned far off-screen) has one click to return to a sane state.
+function zoomReset() {
+	zoom.value = 1;
+	panX.value = 0;
+	panY.value = 0;
+	rotation.value = 0;
+}
 
 // Wheel-event throttle. Trackpads and high-precision wheels emit many small deltaY events
 // per physical notch, which would step the brush size dozens of pixels per scroll. We
@@ -2264,11 +2403,46 @@ function zoomReset() { zoom.value = 1; }
 const BRUSH_WHEEL_STEP = 40;
 let brushWheelAccum = 0;
 
+// Adjust zoom + pan so the canvas point currently under (clientX, clientY) keeps the same
+// screen-space position after zoom. Works regardless of rotation because the math operates
+// on the canvas centre's screen position (rotation preserves the AABB centre, which equals
+// the wrap centre by construction).
+//
+// Derivation: let cursor_offset_old = cursor - canvasCentre_old. After scaling by `factor`,
+// the same canvas-pixel point's screen offset becomes factor * cursor_offset_old. To keep
+// the cursor over the same pixel we move the canvas centre to (cursor - factor * offset_old).
+// Since canvasCentre = containerCentre + (panX, panY) and rotation leaves the centre fixed,
+// the new pan reduces to: pan_new = factor * pan_old + (1 - factor) * (cursor - containerCentre).
+function zoomAtCursor(clientX: number, clientY: number, factor: number) {
+	const oldZoom = zoom.value;
+	const newZoom = clampZoom(oldZoom * factor);
+	if (newZoom === oldZoom) return;
+	const cont = canvasContainerEl.value;
+	if (!cont) {
+		zoom.value = newZoom;
+		return;
+	}
+	const contRect = cont.getBoundingClientRect();
+	const containerCx = (contRect.left + contRect.right) / 2;
+	const containerCy = (contRect.top + contRect.bottom) / 2;
+	const realFactor = newZoom / oldZoom;
+	panX.value = realFactor * panX.value + (1 - realFactor) * (clientX - containerCx);
+	panY.value = realFactor * panY.value + (1 - realFactor) * (clientY - containerCy);
+	zoom.value = newZoom;
+}
+
 function onWheel(ev: WheelEvent) {
+	if (tool.value === 'hand') {
+		// Hand tool: plain wheel zooms focused on the cursor.
+		ev.preventDefault();
+		const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
+		zoomAtCursor(ev.clientX, ev.clientY, factor);
+		return;
+	}
 	if (ev.ctrlKey || ev.metaKey) {
 		ev.preventDefault();
 		const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
-		zoom.value = clampZoom(zoom.value * factor);
+		zoomAtCursor(ev.clientX, ev.clientY, factor);
 		return;
 	}
 	// Shift+wheel keeps default browser behavior (horizontal scroll).
@@ -2756,20 +2930,18 @@ onBeforeUnmount(() => {
 .canvasScroll {
 	position: absolute;
 	inset: 0;
-	overflow: auto;
-	padding: 12px;
+	overflow: hidden;
 	box-sizing: border-box;
 }
 
 .canvasWrap {
-	display: flex;
-	align-items: center;
-	justify-content: center;
+	position: absolute;
+	left: 50%;
+	top: 50%;
 	width: fit-content;
 	height: fit-content;
-	min-width: 100%;
-	min-height: 100%;
-	position: relative;
+	transform-origin: center center;
+	will-change: transform;
 }
 
 .zoomLabel {
@@ -2844,6 +3016,14 @@ onBeforeUnmount(() => {
 
 .canvasTextCursor {
 	cursor: text;
+}
+
+.canvasGrabCursor {
+	cursor: grab;
+}
+
+.canvasGrabbingCursor {
+	cursor: grabbing;
 }
 
 .textBoxOverlay {
