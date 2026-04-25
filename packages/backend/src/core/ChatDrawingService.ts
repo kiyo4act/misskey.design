@@ -24,6 +24,7 @@ const MAX_STROKES = 4000;
 const MAX_POINTS_PER_STROKE = 2000;
 const MIN_STROKE_WIDTH = 0.0005;
 const MAX_STROKE_WIDTH = 0.25;
+const MAX_TEXT_LEN = 1000;
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 768;
 // Redis live buffer: strokes sent via WebSocket that have not yet been committed via update.
@@ -71,10 +72,12 @@ function sanitizeStroke(input: unknown): ChatDrawingStroke | null {
 		? Math.max(MIN_STROKE_WIDTH, Math.min(MAX_STROKE_WIDTH, widthNum))
 		: 0.01;
 
-	const tool: 'pen' | 'eraser' | 'fill' | 'paint' =
+	const tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' =
 		raw.tool === 'eraser' ? 'eraser' :
 		raw.tool === 'fill' ? 'fill' :
 		raw.tool === 'paint' ? 'paint' :
+		raw.tool === 'watercolor' ? 'watercolor' :
+		raw.tool === 'text' ? 'text' :
 		'pen';
 
 	const id = typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(raw.id) ? raw.id : undefined;
@@ -84,7 +87,14 @@ function sanitizeStroke(input: unknown): ChatDrawingStroke | null {
 		'main';
 	const clip = raw.clip === true ? true : undefined;
 
-	return { id, points, color, width, tool, layer, clip };
+	let text: string | undefined;
+	if (tool === 'text' && typeof raw.text === 'string') {
+		// eslint-disable-next-line no-control-regex
+		text = raw.text.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '').slice(0, MAX_TEXT_LEN);
+	}
+	if (tool === 'text' && !text) return null;
+
+	return { id, points, color, width, tool, layer, clip, text };
 }
 
 function hexToRgba(hex: string): [number, number, number, number] {
@@ -409,6 +419,24 @@ function renderOneStroke(
 ): void {
 		if (stroke.points.length === 0) return;
 
+		if (stroke.tool === 'text') {
+			if (!stroke.text) return;
+			const fontPx = Math.max(4, stroke.width * width);
+			const lineHeight = fontPx * 1.4;
+			const lines = stroke.text.split('\n');
+			const x = stroke.points[0][0] * width;
+			const y = stroke.points[0][1] * height;
+			ctx.save();
+			ctx.font = `${fontPx}px sans-serif`;
+			ctx.textBaseline = 'top';
+			ctx.fillStyle = stroke.color;
+			for (let i = 0; i < lines.length; i++) {
+				ctx.fillText(lines[i], x, y + i * lineHeight);
+			}
+			ctx.restore();
+			return;
+		}
+
 		if (stroke.tool === 'fill') {
 			const [fx, fy] = stroke.points[0];
 			const sx = Math.max(0, Math.min(width - 1, Math.floor(fx * width)));
@@ -441,11 +469,23 @@ function renderOneStroke(
 		ctx.save();
 		ctx.lineCap = 'round';
 		ctx.lineJoin = 'round';
-		if (stroke.tool === 'eraser') {
+		const isPaint = stroke.tool === 'paint';
+		const isEraser = stroke.tool === 'eraser';
+		const isWatercolor = stroke.tool === 'watercolor';
+		if (isEraser) {
 			// Clear pixels (sets alpha to 0) so an underlying layer shows through in the composite.
 			ctx.globalCompositeOperation = 'destination-out';
 			ctx.strokeStyle = '#000';
 			ctx.globalAlpha = 1;
+		} else if (isWatercolor) {
+			// Watercolor: feathered soft edge via shadowBlur, low per-segment alpha so overlapping
+			// passes build up depth — the hallmark of layered watercolor pigment. clip is ignored
+			// (source-over is required for the bleed halo to land on transparent layers).
+			ctx.globalCompositeOperation = 'source-over';
+			ctx.strokeStyle = stroke.color;
+			ctx.shadowColor = stroke.color;
+			ctx.shadowOffsetX = 0;
+			ctx.shadowOffsetY = 0;
 		} else if (stroke.clip) {
 			// Lineart clipping: only paint where the target layer already has pixels, so the
 			// stroke recolors the existing lineart (or main/draft) rather than painting new
@@ -457,14 +497,18 @@ function renderOneStroke(
 			ctx.strokeStyle = stroke.color;
 		}
 		const baseWidth = Math.max(1, stroke.width * width);
-		const isPaint = stroke.tool === 'paint';
-		const isEraser = stroke.tool === 'eraser';
 
 		const p0 = stroke.points[0];
 		if (stroke.points.length === 1) {
 			const pr = p0.length >= 3 ? p0[2]! : 1;
-			ctx.lineWidth = Math.max(0.5, baseWidth * pr);
-			if (!isEraser) ctx.globalAlpha = isPaint ? 0.25 + 0.55 * pr : 1;
+			if (isWatercolor) {
+				ctx.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * pr));
+				ctx.shadowBlur = baseWidth * 0.7;
+				ctx.globalAlpha = 0.10 + 0.10 * pr;
+			} else {
+				ctx.lineWidth = Math.max(0.5, baseWidth * pr);
+				if (!isEraser) ctx.globalAlpha = isPaint ? 0.25 + 0.55 * pr : 1;
+			}
 			ctx.beginPath();
 			ctx.moveTo(p0[0] * width, p0[1] * height);
 			ctx.lineTo(p0[0] * width + 0.01, p0[1] * height + 0.01);
@@ -476,8 +520,14 @@ function renderOneStroke(
 				const pa = a.length >= 3 ? a[2]! : 1;
 				const pb = b.length >= 3 ? b[2]! : 1;
 				const avg = (pa + pb) / 2;
-				ctx.lineWidth = Math.max(0.5, baseWidth * avg);
-				if (!isEraser) ctx.globalAlpha = isPaint ? 0.25 + 0.55 * avg : 1;
+				if (isWatercolor) {
+					ctx.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * avg));
+					ctx.shadowBlur = baseWidth * 0.7;
+					ctx.globalAlpha = 0.10 + 0.10 * avg;
+				} else {
+					ctx.lineWidth = Math.max(0.5, baseWidth * avg);
+					if (!isEraser) ctx.globalAlpha = isPaint ? 0.25 + 0.55 * avg : 1;
+				}
 				ctx.beginPath();
 				ctx.moveTo(a[0] * width, a[1] * height);
 				ctx.lineTo(b[0] * width, b[1] * height);

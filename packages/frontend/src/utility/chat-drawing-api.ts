@@ -11,9 +11,10 @@ export type ChatDrawingStroke = {
 	points: number[][];
 	color: string;
 	width: number;
-	tool: 'pen' | 'eraser' | 'fill' | 'paint';
+	tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text';
 	layer?: 'main' | 'draft' | 'lineart';
 	clip?: boolean;
+	text?: string;
 };
 
 export type ChatDrawingLite = Misskey.entities.ChatDrawingLite;

@@ -6,15 +6,17 @@
 const MAX_POINTS_PER_STROKE = 2000;
 const MIN_WIDTH = 0.0005;
 const MAX_WIDTH = 0.25;
+const MAX_TEXT_LEN = 1000;
 
 export type SanitizedDrawStroke = {
 	id?: string;
 	points: number[][];
 	color: string;
 	width: number;
-	tool: 'pen' | 'eraser' | 'fill' | 'paint';
+	tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text';
 	layer?: 'main' | 'draft' | 'lineart';
 	clip?: boolean;
+	text?: string;
 };
 
 export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
@@ -50,10 +52,12 @@ export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
 		? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, widthNum))
 		: 0.01;
 
-	const tool: 'pen' | 'eraser' | 'fill' | 'paint' =
+	const tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' =
 		raw.tool === 'eraser' ? 'eraser' :
 		raw.tool === 'fill' ? 'fill' :
 		raw.tool === 'paint' ? 'paint' :
+		raw.tool === 'watercolor' ? 'watercolor' :
+		raw.tool === 'text' ? 'text' :
 		'pen';
 
 	const id = typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(raw.id) ? raw.id : undefined;
@@ -63,5 +67,13 @@ export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
 		'main';
 	const clip = raw.clip === true ? true : undefined;
 
-	return { id, points, color, width, tool, layer, clip };
+	// Strip control chars except \n; cap length so a single text stroke can't bloat the doc.
+	let text: string | undefined;
+	if (tool === 'text' && typeof raw.text === 'string') {
+		// eslint-disable-next-line no-control-regex
+		text = raw.text.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '').slice(0, MAX_TEXT_LEN);
+	}
+	if (tool === 'text' && !text) return null;
+
+	return { id, points, color, width, tool, layer, clip, text };
 }

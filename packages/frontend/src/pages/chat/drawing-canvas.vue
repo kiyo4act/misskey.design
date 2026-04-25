@@ -23,6 +23,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 			<div :class="$style.toolGroup">
 				<button class="_button" :class="[$style.toolButton, tool === 'pen' ? $style.toolActive : null]" title="ペン" @click="tool = 'pen'"><i class="ti ti-pencil"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'paint' ? $style.toolActive : null]" title="厚塗り" @click="tool = 'paint'"><i class="ti ti-brush"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'watercolor' ? $style.toolActive : null]" title="水彩" @click="tool = 'watercolor'"><i class="ti ti-droplet"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'text' ? $style.toolActive : null]" title="テキスト" @click="tool = 'text'"><i class="ti ti-typography"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'line' ? $style.toolActive : null]" title="直線" @click="tool = 'line'"><i class="ti ti-line"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'eraser' ? $style.toolActive : null]" title="消しゴム" @click="tool = 'eraser'"><i class="ti ti-eraser"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'fill' ? $style.toolActive : null]" title="塗りつぶし" @click="tool = 'fill'"><i class="ti ti-paint"></i></button>
@@ -101,8 +103,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 			<div :class="$style.separator"></div>
 
-			<label :class="$style.sliderField" :title="tool === 'eraser' ? '消しゴムの太さ' : '太さ'">
-				<i :class="[$style.sliderIcon, tool === 'eraser' ? 'ti ti-eraser' : 'ti ti-line-height']"></i>
+			<label :class="$style.sliderField" :title="tool === 'eraser' ? '消しゴムの太さ' : tool === 'text' ? '文字サイズ' : '太さ'">
+				<i :class="[$style.sliderIcon, tool === 'eraser' ? 'ti ti-eraser' : tool === 'text' ? 'ti ti-typography' : 'ti ti-line-height']"></i>
 				<input v-model.number="activeBrushWidth" type="range" min="1" max="60" step="1" :class="$style.widthSlider"/>
 				<span :class="$style.widthValue">{{ activeBrushWidth }}</span>
 			</label>
@@ -166,7 +168,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<div :class="$style.canvasWrap" :style="{ minWidth: '100%', minHeight: '100%' }">
 					<canvas
 						ref="canvasEl"
-						:class="[$style.canvas, (tool === 'fill' || tool === 'spoit') ? $style.canvasFillCursor : $style.canvasBrushCursor, mirrorView ? $style.canvasMirrored : null]"
+						:class="[$style.canvas, (tool === 'fill' || tool === 'spoit') ? $style.canvasFillCursor : (tool === 'text' ? $style.canvasTextCursor : $style.canvasBrushCursor), mirrorView ? $style.canvasMirrored : null]"
 						:width="CANVAS_W"
 						:height="CANVAS_H"
 						:style="canvasDisplayStyle"
@@ -180,12 +182,22 @@ SPDX-License-Identifier: AGPL-3.0-only
 						@dragstart.prevent
 						@dblclick.prevent
 					></canvas>
+					<textarea
+						v-if="tool === 'text' && textCursor"
+						ref="textBoxEl"
+						v-model="textBoxValue"
+						:class="[$style.textBoxOverlay, textLocked ? $style.textBoxLocked : null]"
+						:style="textBoxStyle"
+						spellcheck="false"
+						@keydown="onTextKeydown"
+						@pointerdown.stop
+					></textarea>
 				</div>
 			</div>
 
 			<!-- Circular brush cursor overlay — positioned against canvasArea so it stays fixed when scrolling -->
 			<div
-				v-show="cursorVisible && tool !== 'fill' && tool !== 'spoit'"
+				v-show="cursorVisible && tool !== 'fill' && tool !== 'spoit' && tool !== 'text'"
 				:class="$style.brushCursor"
 				:style="cursorStyle"
 			></div>
@@ -216,7 +228,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 </template>
 
 <script lang="ts" setup>
-import { onMounted, onBeforeUnmount, ref, computed, useTemplateRef, watch } from 'vue';
+import { onMounted, onBeforeUnmount, ref, computed, useTemplateRef, watch, nextTick } from 'vue';
 import * as Misskey from 'misskey-js';
 import MkWindow from '@/components/MkWindow.vue';
 import MkButton from '@/components/MkButton.vue';
@@ -262,7 +274,105 @@ const cursorStyle = ref<{ left: string; top: string; width: string; height: stri
 
 // UI tools include client-only 'line' (commits as a 2-point pen stroke on pointer up)
 // and 'spoit' (eyedropper — never commits a stroke, just sets color from the pixel picked).
-const tool = ref<'pen' | 'eraser' | 'fill' | 'paint' | 'line' | 'spoit'>('pen');
+const tool = ref<'pen' | 'eraser' | 'fill' | 'paint' | 'line' | 'spoit' | 'watercolor' | 'text'>('pen');
+
+// Text tool state. Two phases:
+//   - follow: textarea is a ghost preview that tracks the pointer; pointer-events: none on
+//     the element lets canvas receive the click that locks. textLocked = false.
+//   - locked: textarea is anchored at the last click position, focused, and accepts input.
+// textCursor null = nothing visible (e.g., pointer is off-canvas in follow phase).
+const textCursor = ref<null | { x: number; y: number }>(null);
+const textLocked = ref<boolean>(false);
+const textBoxValue = ref<string>('');
+const textBoxEl = useTemplateRef<HTMLTextAreaElement>('textBoxEl');
+
+function refocusTextBox() {
+	if (tool.value !== 'text') return;
+	// nextTick covers the post-Vue-update reflow; a subsequent setTimeout(0) covers the
+	// case where the browser shifts focus to <body> AFTER the current event dispatch (some
+	// browsers fire that during the click → mouseup tail, after our nextTick). The guard
+	// avoids stealing focus back if the user has intentionally moved to another input.
+	const el = textBoxEl.value;
+	if (!el) {
+		void nextTick(() => textBoxEl.value?.focus());
+		return;
+	}
+	void nextTick(() => textBoxEl.value?.focus());
+	setTimeout(() => {
+		if (tool.value !== 'text') return;
+		const active = document.activeElement;
+		if (active && active !== document.body && active !== el && active instanceof HTMLElement && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+			return;
+		}
+		textBoxEl.value?.focus();
+	}, 0);
+}
+
+function cancelTextBox() {
+	textBoxValue.value = '';
+	textLocked.value = false;
+	// Keep textCursor so the empty ghost stays visible at the same spot until the next
+	// pointermove updates it (returns to follow mode).
+}
+
+function commitOpenTextBox() {
+	if (!textCursor.value || !textLocked.value) return;
+	const at = textCursor.value;
+	commitTextAt(at.x, at.y);
+	// Enter releases the anchor; the textarea returns to follow mode at the current
+	// pointer location (next pointermove will reposition it).
+	textLocked.value = false;
+	textBoxValue.value = '';
+}
+
+function insertNewlineAtCaret() {
+	const el = textBoxEl.value;
+	if (!el) {
+		textBoxValue.value += '\n';
+		return;
+	}
+	const start = el.selectionStart ?? textBoxValue.value.length;
+	const end = el.selectionEnd ?? textBoxValue.value.length;
+	textBoxValue.value = textBoxValue.value.slice(0, start) + '\n' + textBoxValue.value.slice(end);
+	void nextTick(() => {
+		const e = textBoxEl.value;
+		if (!e) return;
+		const pos = start + 1;
+		e.selectionStart = e.selectionEnd = pos;
+	});
+}
+
+function onTextKeydown(ev: KeyboardEvent) {
+	// Skip while IME composition is active so Enter doesn't commit mid-conversion.
+	if (ev.isComposing) return;
+	if (ev.key === 'Enter') {
+		if (ev.ctrlKey || ev.metaKey) {
+			ev.preventDefault();
+			insertNewlineAtCaret();
+		} else if (!ev.shiftKey && !ev.altKey) {
+			ev.preventDefault();
+			commitOpenTextBox();
+		}
+		return;
+	}
+	if (ev.key === 'Escape') {
+		ev.preventDefault();
+		cancelTextBox();
+	}
+}
+
+watch(tool, (newT: string, oldT: string) => {
+	if (newT === 'text') {
+		// Fresh state on entry; cursor follow attaches once pointer enters the canvas.
+		textBoxValue.value = '';
+		textLocked.value = false;
+	} else if (oldT === 'text') {
+		// Discard pending text when leaving text mode; user must explicitly click to commit.
+		textBoxValue.value = '';
+		textLocked.value = false;
+		textCursor.value = null;
+	}
+});
 const currentLayer = ref<'main' | 'draft' | 'lineart'>('main');
 const draftOpacity = ref(0.4);
 const zoom = ref(1);
@@ -677,6 +787,30 @@ function grabPreStrokeSnapshot(layer: 'main' | 'draft' | 'lineart') {
 function computeStrokeBbox(stroke: ChatDrawingStroke): { x: number; y: number; w: number; h: number } {
 	if (stroke.tool === 'fill' || stroke.points.length === 0) {
 		return { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H };
+	}
+	if (stroke.tool === 'text') {
+		// Text bbox = anchor + measured text size at the stored font px. Falls back to full
+		// canvas if measurement context isn't available yet (rare — only before first layer init).
+		const measureCtx = mainCtx ?? draftCtx ?? lineartCtx;
+		if (!stroke.text || !measureCtx) return { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H };
+		const fontPx = Math.max(4, stroke.width * CANVAS_W);
+		const lineHeight = fontPx * 1.4;
+		const lines = stroke.text.split('\n');
+		measureCtx.save();
+		measureCtx.font = `${fontPx}px sans-serif`;
+		let maxW = 0;
+		for (const line of lines) {
+			const m = measureCtx.measureText(line);
+			if (m.width > maxW) maxW = m.width;
+		}
+		measureCtx.restore();
+		const ax = stroke.points[0][0] * CANVAS_W;
+		const ay = stroke.points[0][1] * CANVAS_H;
+		const x = Math.max(0, Math.floor(ax - 2));
+		const y = Math.max(0, Math.floor(ay - 2));
+		const w = Math.min(CANVAS_W - x, Math.ceil(maxW + 6));
+		const h = Math.min(CANVAS_H - y, Math.ceil(lines.length * lineHeight + 6));
+		return { x, y, w: Math.max(1, w), h: Math.max(1, h) };
 	}
 	const widthPx = Math.max(1, stroke.width * CANVAS_W);
 	const pad = Math.ceil(widthPx / 2 + 2);
@@ -1339,17 +1473,45 @@ function renderStrokeToCtx(
 		return;
 	}
 
+	if (stroke.tool === 'text') {
+		if (!stroke.text) return;
+		const fontPx = Math.max(4, stroke.width * CANVAS_W);
+		const lineHeight = fontPx * 1.4;
+		const lines = stroke.text.split('\n');
+		const x = stroke.points[0][0] * CANVAS_W;
+		const y = stroke.points[0][1] * CANVAS_H;
+		c.save();
+		c.font = `${fontPx}px sans-serif`;
+		c.textBaseline = 'top';
+		c.fillStyle = stroke.color;
+		for (let i = 0; i < lines.length; i++) {
+			c.fillText(lines[i], x, y + i * lineHeight);
+		}
+		c.restore();
+		return;
+	}
+
 	c.save();
 	c.lineCap = 'round';
 	c.lineJoin = 'round';
 	const isPaint = stroke.tool === 'paint';
 	const isEraser = stroke.tool === 'eraser';
+	const isWatercolor = stroke.tool === 'watercolor';
 	if (isEraser) {
 		// Clear pixels on the layer (alpha → 0). The composite will show whatever layer is
 		// beneath (or the white background), so it reads as "erased".
 		c.globalCompositeOperation = 'destination-out';
 		c.strokeStyle = '#000';
 		c.globalAlpha = 1;
+	} else if (isWatercolor) {
+		// Watercolor: shadowBlur gives the bleeding feathered edge; per-segment alpha is low
+		// so retracing / overlapping segments build up depth like layered pigment. clip is
+		// ignored (source-over keeps the halo visible on transparent layers).
+		c.globalCompositeOperation = 'source-over';
+		c.strokeStyle = stroke.color;
+		c.shadowColor = stroke.color;
+		c.shadowOffsetX = 0;
+		c.shadowOffsetY = 0;
 	} else if (stroke.clip) {
 		// Lineart clip: paint only where the target already has pixels (source-atop).
 		c.globalCompositeOperation = 'source-atop';
@@ -1362,8 +1524,14 @@ function renderStrokeToCtx(
 	const p0 = stroke.points[0];
 	if (stroke.points.length === 1) {
 		const pr = p0.length >= 3 ? (p0[2] as number) : 1;
-		c.lineWidth = Math.max(0.5, baseWidth * pr);
-		if (!isEraser) c.globalAlpha = isPaint ? 0.25 + 0.55 * pr : 1;
+		if (isWatercolor) {
+			c.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * pr));
+			c.shadowBlur = baseWidth * 0.7;
+			c.globalAlpha = 0.10 + 0.10 * pr;
+		} else {
+			c.lineWidth = Math.max(0.5, baseWidth * pr);
+			if (!isEraser) c.globalAlpha = isPaint ? 0.25 + 0.55 * pr : 1;
+		}
 		c.beginPath();
 		c.moveTo(p0[0] * CANVAS_W, p0[1] * CANVAS_H);
 		c.lineTo(p0[0] * CANVAS_W + 0.01, p0[1] * CANVAS_H + 0.01);
@@ -1375,8 +1543,14 @@ function renderStrokeToCtx(
 			const pa = a.length >= 3 ? (a[2] as number) : 1;
 			const pb = b.length >= 3 ? (b[2] as number) : 1;
 			const avg = (pa + pb) / 2;
-			c.lineWidth = Math.max(0.5, baseWidth * avg);
-			if (!isEraser) c.globalAlpha = isPaint ? 0.25 + 0.55 * avg : 1;
+			if (isWatercolor) {
+				c.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * avg));
+				c.shadowBlur = baseWidth * 0.7;
+				c.globalAlpha = 0.10 + 0.10 * avg;
+			} else {
+				c.lineWidth = Math.max(0.5, baseWidth * avg);
+				if (!isEraser) c.globalAlpha = isPaint ? 0.25 + 0.55 * avg : 1;
+			}
 			c.beginPath();
 			c.moveTo(a[0] * CANVAS_W, a[1] * CANVAS_H);
 			c.lineTo(b[0] * CANVAS_W, b[1] * CANVAS_H);
@@ -1487,6 +1661,69 @@ const canvasDisplayStyle = computed(() => {
 	};
 });
 
+// Position + sizing for the floating text-tool overlay <textarea>. Lives as a sibling of the
+// canvas inside canvasWrap, which centers the canvas via flex when smaller than the scroll
+// viewport. We mirror the X anchor when mirrorView is on (the canvas itself is CSS-flipped,
+// the textarea isn't) and offset by canvasWrap's flex centering padding so the editor lands
+// directly under the cursor. Font size is bound live to activeBrushWidth so the wheel/slider
+// resize affects the in-flight preview too. The width/height are measured from the buffer
+// content via canvas measureText so the box auto-expands as the user types and shrinks back
+// when text is deleted; an empty buffer falls back to a small minimum.
+const TEXT_BOX_MIN_WIDTH_PX = 28;
+const TEXT_BOX_PAD_X = 10;
+const TEXT_BOX_PAD_Y = 4;
+
+const textBoxStyle = computed(() => {
+	if (!textCursor.value) return null;
+	const cw = containerSize.value.w;
+	const ch = containerSize.value.h;
+	if (cw === 0 || ch === 0) return null;
+	const ratio = CANVAS_W / CANVAS_H;
+	const baseW = Math.min(cw, ch * ratio);
+	const baseH = baseW / ratio;
+	const w = baseW * zoom.value;
+	const h = baseH * zoom.value;
+	const wrapW = Math.max(w, cw);
+	const wrapH = Math.max(h, ch);
+	const offX = (wrapW - w) / 2;
+	const offY = (wrapH - h) / 2;
+	const displayScale = w / CANVAS_W;
+	const px = (mirrorView.value ? (1 - textCursor.value.x) : textCursor.value.x) * w + offX;
+	const py = textCursor.value.y * h + offY;
+	const fontPxCanvas = activeBrushWidth.value;
+	const fontPxCSS = fontPxCanvas * displayScale;
+	const lineHeightCSS = fontPxCSS * 1.4;
+
+	// Measure widest line in the buffer using the same font we'll commit with, so the
+	// textarea matches the eventual rendered stroke width.
+	let widthCSS = TEXT_BOX_MIN_WIDTH_PX;
+	let lineCount = 1;
+	if (mainCtx) {
+		const text = textBoxValue.value;
+		const lines = text.length > 0 ? text.split('\n') : [''];
+		lineCount = lines.length;
+		mainCtx.save();
+		mainCtx.font = `${fontPxCanvas}px sans-serif`;
+		let maxW = 0;
+		for (const line of lines) {
+			const m = mainCtx.measureText(line);
+			if (m.width > maxW) maxW = m.width;
+		}
+		mainCtx.restore();
+		widthCSS = Math.max(TEXT_BOX_MIN_WIDTH_PX, Math.ceil(maxW * displayScale + TEXT_BOX_PAD_X));
+	}
+	const heightCSS = Math.ceil(lineCount * lineHeightCSS + TEXT_BOX_PAD_Y);
+
+	return {
+		left: `${px}px`,
+		top: `${py}px`,
+		fontSize: `${fontPxCSS}px`,
+		color: composedColor.value,
+		width: `${widthCSS}px`,
+		height: `${heightCSS}px`,
+	};
+});
+
 function updateBrushCursor(ev: PointerEvent) {
 	if (!canvasEl.value || !canvasAreaEl.value) return;
 	const canvasRect = canvasEl.value.getBoundingClientRect();
@@ -1506,16 +1743,34 @@ function onCanvasPointerMove(ev: PointerEvent) {
 	updateBrushCursor(ev);
 	const p = canvasPointToNormalized(ev);
 	sendCursor(p[0], p[1]);
+	// Follow phase: the ghost text box tracks the pointer until the user clicks to anchor.
+	if (tool.value === 'text' && !textLocked.value) {
+		textCursor.value = { x: p[0], y: p[1] };
+	}
 	onPointerMove(ev);
 }
 
 function onCanvasPointerEnter(ev: PointerEvent) {
 	cursorVisible.value = true;
 	updateBrushCursor(ev);
+	if (tool.value === 'text') {
+		if (!textLocked.value) {
+			const p = canvasPointToNormalized(ev);
+			textCursor.value = { x: p[0], y: p[1] };
+		} else if (textCursor.value) {
+			// Toolbar interactions blur the locked textarea — restore focus when the
+			// pointer returns to the canvas so keystrokes resume routing.
+			refocusTextBox();
+		}
+	}
 }
 
 function onCanvasPointerLeave(ev: PointerEvent) {
 	cursorVisible.value = false;
+	if (tool.value === 'text' && !textLocked.value) {
+		// Hide the ghost preview when off-canvas; the locked textarea stays put.
+		textCursor.value = null;
+	}
 	onPointerUp(ev);
 }
 
@@ -1545,6 +1800,36 @@ function flushStabilizerTail(): [number, number, number][] {
 	}
 	if (rawBuffer.length > 0) out.push(rawBuffer[rawBuffer.length - 1]);
 	return out;
+}
+
+// Stamp the current text buffer at the given normalized canvas position. Called from the
+// canvas pointerdown handler when text tool is active; the buffer persists afterwards so
+// the same text can be stamped multiple times. Caller is responsible for refocusing the
+// textarea — the canvas pointerdown blurs it and we want focus restored regardless of
+// whether anything was actually committed (empty-buffer clicks are no-ops).
+function commitTextAt(x: number, y: number) {
+	const text = textBoxValue.value;
+	if (!text.trim()) return;
+	const layerForStroke = effectiveLayerForNewStroke();
+	grabPreStrokeSnapshot(layerForStroke);
+	const stroke: ChatDrawingStroke = {
+		id: newStrokeId(),
+		points: [[x, y]],
+		color: composedColor.value,
+		width: activeBrushWidth.value / CANVAS_W,
+		tool: 'text',
+		layer: layerForStroke,
+		text,
+	};
+	strokes.value.push(stroke);
+	renderStroke(stroke);
+	props.connection.send('drawStroke', { drawingId: props.drawingId, stroke });
+	myUndoStack.value.push(stroke.id!);
+	myRedoStack.value = [];
+	commitStrokePatch(stroke);
+	maybeBakeOverflow();
+	recordRecentColor(color.value);
+	textBoxValue.value = '';
 }
 
 // Read a single pixel from the composited display canvas and return its hex color.
@@ -1594,6 +1879,21 @@ function onPointerDown(ev: PointerEvent) {
 		commitStrokePatch(stroke);
 		maybeBakeOverflow();
 		recordRecentColor(color.value);
+		return;
+	}
+
+	if (tool.value === 'text') {
+		// If the previous click anchored a box and the user typed into it, commit at the
+		// FIXED locked position before re-anchoring at the new click point.
+		if (textLocked.value && textCursor.value && textBoxValue.value.trim()) {
+			commitTextAt(textCursor.value.x, textCursor.value.y);
+		}
+		textBoxValue.value = '';
+		textCursor.value = { x: point[0], y: point[1] };
+		textLocked.value = true;
+		// Canvas pointerdown blurs the textarea (preventDefault doesn't reliably preserve
+		// focus across browsers); restore it so the user keeps typing right after the click.
+		refocusTextBox();
 		return;
 	}
 
@@ -1692,15 +1992,27 @@ function onPointerMove(ev: PointerEvent) {
 		c.globalCompositeOperation = 'destination-out';
 		c.strokeStyle = '#000';
 		c.globalAlpha = 1;
+		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
+	} else if (tool.value === 'watercolor') {
+		// Match renderStrokeToCtx watercolor branch so live preview matches the committed render.
+		c.globalCompositeOperation = 'source-over';
+		c.strokeStyle = composedColor.value;
+		c.shadowColor = composedColor.value;
+		c.shadowOffsetX = 0;
+		c.shadowOffsetY = 0;
+		c.shadowBlur = activeBrushWidth.value * 0.7;
+		c.globalAlpha = 0.10 + 0.10 * avgP;
+		c.lineWidth = Math.max(0.5, activeBrushWidth.value * (0.4 + 0.6 * avgP));
 	} else if (effectiveClipForNewStroke()) {
 		c.globalCompositeOperation = 'source-atop';
 		c.strokeStyle = composedColor.value;
 		c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
+		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 	} else {
 		c.strokeStyle = composedColor.value;
 		c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
+		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 	}
-	c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 	c.beginPath();
 	c.moveTo(last[0] * CANVAS_W, last[1] * CANVAS_H);
 	c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
@@ -1779,15 +2091,26 @@ function onPointerUp(ev: PointerEvent) {
 			c.globalCompositeOperation = 'destination-out';
 			c.strokeStyle = '#000';
 			c.globalAlpha = 1;
+			c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
+		} else if (tool.value === 'watercolor') {
+			c.globalCompositeOperation = 'source-over';
+			c.strokeStyle = composedColor.value;
+			c.shadowColor = composedColor.value;
+			c.shadowOffsetX = 0;
+			c.shadowOffsetY = 0;
+			c.shadowBlur = activeBrushWidth.value * 0.7;
+			c.globalAlpha = 0.10 + 0.10 * avgP;
+			c.lineWidth = Math.max(0.5, activeBrushWidth.value * (0.4 + 0.6 * avgP));
 		} else if (effectiveClipForNewStroke()) {
 			c.globalCompositeOperation = 'source-atop';
 			c.strokeStyle = composedColor.value;
 			c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
+			c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 		} else {
 			c.strokeStyle = composedColor.value;
 			c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
+			c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 		}
-		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 		c.beginPath();
 		c.moveTo(last[0] * CANVAS_W, last[1] * CANVAS_H);
 		c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
@@ -1805,9 +2128,10 @@ function onPointerUp(ev: PointerEvent) {
 
 	// tool.value is a ref so TS doesn't narrow across the earlier branches that return
 	// for line/fill/spoit — explicitly coerce to the committable tool set.
-	const commitTool: 'pen' | 'eraser' | 'paint' =
+	const commitTool: 'pen' | 'eraser' | 'paint' | 'watercolor' =
 		tool.value === 'eraser' ? 'eraser' :
 		tool.value === 'paint' ? 'paint' :
+		tool.value === 'watercolor' ? 'watercolor' :
 		'pen';
 	const commitLayer = preStrokeLayerTarget ?? currentLayer.value;
 	const commitClip = effectiveClipForNewStroke() && commitTool !== 'eraser';
@@ -1934,11 +2258,39 @@ function zoomIn() { zoom.value = clampZoom(zoom.value * 1.25); }
 function zoomOut() { zoom.value = clampZoom(zoom.value / 1.25); }
 function zoomReset() { zoom.value = 1; }
 
+// Wheel-event throttle. Trackpads and high-precision wheels emit many small deltaY events
+// per physical notch, which would step the brush size dozens of pixels per scroll. We
+// accumulate deltaY into a quantum and only step when the accumulator crosses ±BRUSH_WHEEL_STEP.
+const BRUSH_WHEEL_STEP = 40;
+let brushWheelAccum = 0;
+
 function onWheel(ev: WheelEvent) {
-	if (!(ev.ctrlKey || ev.metaKey)) return;
+	if (ev.ctrlKey || ev.metaKey) {
+		ev.preventDefault();
+		const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
+		zoom.value = clampZoom(zoom.value * factor);
+		return;
+	}
+	// Shift+wheel keeps default browser behavior (horizontal scroll).
+	if (ev.shiftKey) return;
+	// Plain wheel: adjust brush/text size. Sign convention: scroll up = bigger.
 	ev.preventDefault();
-	const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
-	zoom.value = clampZoom(zoom.value * factor);
+	brushWheelAccum += ev.deltaY;
+	let steps = 0;
+	while (brushWheelAccum >= BRUSH_WHEEL_STEP) { brushWheelAccum -= BRUSH_WHEEL_STEP; steps -= 1; }
+	while (brushWheelAccum <= -BRUSH_WHEEL_STEP) { brushWheelAccum += BRUSH_WHEEL_STEP; steps += 1; }
+	if (steps === 0) return;
+	const next = Math.max(1, Math.min(60, activeBrushWidth.value + steps));
+	if (next === activeBrushWidth.value) return;
+	activeBrushWidth.value = next;
+	// Resize the live brush cursor in place so the visual size matches the new value
+	// without waiting for the next pointermove.
+	if (cursorVisible.value && canvasEl.value) {
+		const canvasRect = canvasEl.value.getBoundingClientRect();
+		const displayScale = canvasRect.width / CANVAS_W;
+		const size = Math.max(4, next * displayScale);
+		cursorStyle.value = { ...cursorStyle.value, width: `${size}px`, height: `${size}px` };
+	}
 }
 
 function removeStrokeById(strokeId: string): ChatDrawingStroke | null {
@@ -2051,6 +2403,11 @@ async function bakeCompositePngBase64(): Promise<string | null> {
 
 async function saveAndClose() {
 	if (saving.value) return;
+	// Flush any pending text-tool buffer at the last known cursor position so a typed-but-
+	// unstamped text doesn't disappear when the user hits save.
+	if (tool.value === 'text' && textCursor.value && textBoxValue.value.trim()) {
+		commitTextAt(textCursor.value.x, textCursor.value.y);
+	}
 	saving.value = true;
 	try {
 		const imageBase64 = await bakeCompositePngBase64();
@@ -2412,6 +2769,7 @@ onBeforeUnmount(() => {
 	height: fit-content;
 	min-width: 100%;
 	min-height: 100%;
+	position: relative;
 }
 
 .zoomLabel {
@@ -2482,6 +2840,34 @@ onBeforeUnmount(() => {
 
 .canvasFillCursor {
 	cursor: crosshair;
+}
+
+.canvasTextCursor {
+	cursor: text;
+}
+
+.textBoxOverlay {
+	position: absolute;
+	margin: 0;
+	padding: 0;
+	border: 1px dashed rgba(0, 0, 0, 0.6);
+	background: rgba(255, 255, 255, 0.55);
+	font-family: sans-serif;
+	line-height: 1.4;
+	resize: none;
+	overflow: hidden;
+	box-sizing: content-box;
+	white-space: pre;
+	z-index: 25;
+	outline: none;
+	caret-color: currentColor;
+	// Follow phase: ghost preview, clicks pass through to canvas to set the anchor.
+	pointer-events: none;
+}
+
+.textBoxLocked {
+	// Locked phase: textarea accepts focus, caret, in-element clicks for caret positioning.
+	pointer-events: auto;
 }
 
 .canvasMirrored {

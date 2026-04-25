@@ -15,7 +15,7 @@ export type ChatDrawingStroke = {
 	points: number[][];
 	color: string;
 	width: number;
-	tool: 'pen' | 'eraser' | 'fill' | 'paint';
+	tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text';
 	// 'main' (default) or 'draft'. Draft strokes are rendered semi-transparently underneath
 	// the main layer so they serve as an underlay sketch.
 	layer?: 'main' | 'draft' | 'lineart';
@@ -23,6 +23,8 @@ export type ChatDrawingStroke = {
 	// layer already has pixels. Used for "lineart clipping" — recoloring existing lines
 	// rather than painting new pixels next to them.
 	clip?: boolean;
+	// Text content for tool === 'text'. Renders as a multi-line text block anchored at points[0].
+	text?: string;
 };
 
 @Entity('chat_drawing')

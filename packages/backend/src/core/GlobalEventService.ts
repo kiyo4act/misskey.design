@@ -179,9 +179,10 @@ export interface ChatEventTypes {
 			points: number[][];
 			color: string;
 			width: number;
-			tool: 'pen' | 'eraser' | 'fill' | 'paint';
+			tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text';
 			layer?: 'main' | 'draft' | 'lineart';
 			clip?: boolean;
+			text?: string;
 		};
 	};
 	drawClear: {
