@@ -179,10 +179,12 @@ export interface ChatEventTypes {
 			points: number[][];
 			color: string;
 			width: number;
-			tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text';
+			tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' | 'mixer' | 'airbrush';
 			layer?: 'main' | 'draft' | 'lineart';
 			clip?: boolean;
 			text?: string;
+			hardness?: number;
+			core?: boolean;
 		};
 	};
 	drawClear: {

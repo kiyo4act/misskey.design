@@ -22,8 +22,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<div :class="$style.toolbar">
 			<div :class="$style.toolGroup">
 				<button class="_button" :class="[$style.toolButton, tool === 'pen' ? $style.toolActive : null]" title="ペン" @click="tool = 'pen'"><i class="ti ti-pencil"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'paint' ? $style.toolActive : null]" title="厚塗り" @click="tool = 'paint'"><i class="ti ti-brush"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'watercolor' ? $style.toolActive : null]" title="水彩" @click="tool = 'watercolor'"><i class="ti ti-droplet"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'airbrush' ? $style.toolActive : null]" title="エアブラシ" @click="tool = 'airbrush'"><i class="ti ti-spray"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'text' ? $style.toolActive : null]" title="テキスト" @click="tool = 'text'"><i class="ti ti-typography"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'line' ? $style.toolActive : null]" title="直線" @click="tool = 'line'"><i class="ti ti-line"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'eraser' ? $style.toolActive : null]" title="消しゴム" @click="tool = 'eraser'"><i class="ti ti-eraser"></i></button>
@@ -127,6 +126,13 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<input v-model.number="draftOpacity" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
 				<span :class="$style.widthValue">{{ Math.round(draftOpacity * 100) }}</span>
 			</label>
+
+			<label v-if="tool === 'airbrush'" :class="$style.sliderField" title="エアブラシの硬さ (低=ふわふわ広い / 高=シャープ寄り)">
+				<span :class="$style.toolLabel">硬さ</span>
+				<input v-model.number="airbrushHardness" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
+				<span :class="$style.widthValue">{{ Math.round(airbrushHardness * 100) }}</span>
+			</label>
+			<button v-if="tool === 'airbrush'" class="_button" :class="[$style.toolButton, airbrushShowCore ? $style.toolActive : null]" title="コア線（エアブラシの芯を表示）" @click="airbrushShowCore = !airbrushShowCore"><i class="ti ti-line"></i></button>
 
 			<div :class="$style.spacer"></div>
 
@@ -283,7 +289,13 @@ const cursorStyle = ref<{ left: string; top: string; width: string; height: stri
 
 // UI tools include client-only 'line' (commits as a 2-point pen stroke on pointer up)
 // and 'spoit' (eyedropper — never commits a stroke, just sets color from the pixel picked).
-const tool = ref<'pen' | 'eraser' | 'fill' | 'paint' | 'line' | 'spoit' | 'watercolor' | 'text' | 'hand'>('pen');
+const tool = ref<'pen' | 'eraser' | 'fill' | 'line' | 'spoit' | 'text' | 'hand' | 'airbrush'>('pen');
+
+// Airbrush adjustables. Hardness 0..1 maps to shadow blur ratio (low = wide & soft, high
+// = tight & sharp). Core toggles whether the source line is visible — off (default) renders
+// only the blurred halo via the off-canvas shadow trick.
+const airbrushHardness = ref<number>(0.3);
+const airbrushShowCore = ref<boolean>(false);
 
 // View rotation in degrees, applied to canvasWrap (canvas + textarea overlay rotate as a
 // unit). Drawing-tool inverse-mapping uses this in canvasPointToNormalized so strokes still
@@ -459,12 +471,12 @@ const activeBrushWidth = computed<number>({
 // Which layer the next stroke lands on, honouring the lineart-clip override. Only pen/
 // paint/line make sense to clip; other tools ignore the flag.
 function effectiveLayerForNewStroke(): 'main' | 'draft' | 'lineart' {
-	if (lineartClipEnabled.value && (tool.value === 'pen' || tool.value === 'paint' || tool.value === 'line')) return 'lineart';
+	if (lineartClipEnabled.value && (tool.value === 'pen' || tool.value === 'airbrush' || tool.value === 'line')) return 'lineart';
 	return currentLayer.value;
 }
 
 function effectiveClipForNewStroke(): boolean {
-	return lineartClipEnabled.value && (tool.value === 'pen' || tool.value === 'paint' || tool.value === 'line');
+	return lineartClipEnabled.value && (tool.value === 'pen' || tool.value === 'airbrush' || tool.value === 'line');
 }
 const saving = ref(false);
 const loading = ref(true);
@@ -834,7 +846,13 @@ function computeStrokeBbox(stroke: ChatDrawingStroke): { x: number; y: number; w
 		return { x, y, w: Math.max(1, w), h: Math.max(1, h) };
 	}
 	const widthPx = Math.max(1, stroke.width * CANVAS_W);
-	const pad = Math.ceil(widthPx / 2 + 2);
+	// Watercolor and airbrush use shadowBlur for soft edges. The halo extends well past
+	// the line radius — if undo only restores up to the line's own radius, the bleed
+	// stays visible outside the patched rect and undo looks like a square hole. Pad
+	// generously enough to cover the full blur extent.
+	const pad = (stroke.tool === 'watercolor' || stroke.tool === 'airbrush')
+		? Math.ceil(widthPx * 1.6 + 4)
+		: Math.ceil(widthPx / 2 + 2);
 	let minX = CANVAS_W, minY = CANVAS_H, maxX = 0, maxY = 0;
 	for (const p of stroke.points) {
 		const x = p[0] * CANVAS_W;
@@ -1474,6 +1492,126 @@ function floodFillOnContext(
 	c.putImageData(imageData, 0, 0);
 }
 
+// Parse hex color (#RGB / #RRGGBB / #RRGGBBAA) to [r, g, b, a] each in 0..255.
+function parseColorRGBA(hex: string): [number, number, number, number] {
+	const s = hex.replace('#', '');
+	if (s.length === 3) return [parseInt(s[0] + s[0], 16), parseInt(s[1] + s[1], 16), parseInt(s[2] + s[2], 16), 255];
+	if (s.length === 6) return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16), 255];
+	if (s.length === 8) return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16), parseInt(s.slice(6, 8), 16)];
+	return [0, 0, 0, 255];
+}
+
+// Strip the trailing alpha byte (if any) from a hex colour, returning the opaque base
+// colour. Used by the paint-buffer flow which writes at full alpha to the buffer and
+// applies the stroke's transparency once at composite time.
+function hexWithoutAlpha(hex: string): string {
+	const s = hex.replace('#', '');
+	if (s.length === 8) return `#${s.slice(0, 6)}`;
+	return hex;
+}
+
+// Reusable offscreen buffer for the "paint" tool. Paint segments accumulate here at full
+// alpha, then composite onto the live layer with the stroke's alpha in one pass — that
+// avoids the alpha-overlap bead artefact where adjacent round-cap endpoints would otherwise
+// double their alpha and look like a string of dots when the user draws fast.
+const paintBuffer = document.createElement('canvas');
+paintBuffer.width = paintBuffer.height = 0;
+let paintBufferCtx: CanvasRenderingContext2D | null = null;
+function ensurePaintBuffer(): CanvasRenderingContext2D {
+	if (paintBuffer.width !== CANVAS_W || paintBuffer.height !== CANVAS_H) {
+		paintBuffer.width = CANVAS_W;
+		paintBuffer.height = CANVAS_H;
+		paintBufferCtx = paintBuffer.getContext('2d');
+	}
+	return paintBufferCtx!;
+}
+
+// Snapshot of the active layer at the start of the current paint stroke, used for fast
+// drawImage-based restore on every pointermove (cheaper than putImageData of an ImageData).
+const paintBaselineCanvas = document.createElement('canvas');
+paintBaselineCanvas.width = paintBaselineCanvas.height = 0;
+let paintBaselineCtx: CanvasRenderingContext2D | null = null;
+function ensurePaintBaseline(): CanvasRenderingContext2D {
+	if (paintBaselineCanvas.width !== CANVAS_W || paintBaselineCanvas.height !== CANVAS_H) {
+		paintBaselineCanvas.width = CANVAS_W;
+		paintBaselineCanvas.height = CANVAS_H;
+		paintBaselineCtx = paintBaselineCanvas.getContext('2d');
+	}
+	return paintBaselineCtx!;
+}
+
+let paintLiveLayer: 'main' | 'draft' | 'lineart' | null = null;
+
+// Snapshot the layer about to be painted, clear the paint buffer — call once at stroke start.
+function startPaintLive(layer: 'main' | 'draft' | 'lineart') {
+	const baseCtx = ensurePaintBaseline();
+	const layerCanvas = layer === 'main' ? mainCanvas : layer === 'draft' ? draftCanvas : lineartCanvas;
+	baseCtx.save();
+	baseCtx.setTransform(1, 0, 0, 1, 0, 0);
+	baseCtx.globalCompositeOperation = 'copy';
+	baseCtx.drawImage(layerCanvas, 0, 0);
+	baseCtx.restore();
+	const bufCtx = ensurePaintBuffer();
+	bufCtx.save();
+	bufCtx.setTransform(1, 0, 0, 1, 0, 0);
+	bufCtx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+	bufCtx.restore();
+	paintLiveLayer = layer;
+}
+
+// Stamp a segment onto the live brush buffer at full alpha, then re-render the active
+// layer = baseline + (buffer composited at strokeAlpha). Used by all brush-style tools
+// (pen / paint / watercolor / mixer) — overlapping segments at alpha 1 are idempotent
+// inside the buffer, so the bead artefact at endpoints is gone. Optional `shadow` enables
+// the watercolor-style soft-edge bleed.
+function paintLiveDrawSegment(
+	fromX: number, fromY: number,
+	toX: number, toY: number,
+	lineWidth: number,
+	colorOpaque: string,
+	strokeAlpha: number,
+	clip: boolean,
+	shadow?: { color: string; blur: number; offsetX?: number; offsetY?: number },
+) {
+	const bufCtx = ensurePaintBuffer();
+	bufCtx.save();
+	bufCtx.lineCap = 'round';
+	bufCtx.lineJoin = 'round';
+	bufCtx.globalCompositeOperation = 'source-over';
+	bufCtx.globalAlpha = 1;
+	bufCtx.strokeStyle = colorOpaque;
+	bufCtx.lineWidth = lineWidth;
+	if (shadow) {
+		bufCtx.shadowColor = shadow.color;
+		bufCtx.shadowOffsetX = shadow.offsetX ?? 0;
+		bufCtx.shadowOffsetY = shadow.offsetY ?? 0;
+		bufCtx.shadowBlur = shadow.blur;
+	}
+	bufCtx.beginPath();
+	bufCtx.moveTo(fromX, fromY);
+	bufCtx.lineTo(toX, toY);
+	bufCtx.stroke();
+	bufCtx.restore();
+	if (!paintLiveLayer) return;
+	const layerCtx = getLayerCtx(paintLiveLayer);
+	layerCtx.save();
+	layerCtx.setTransform(1, 0, 0, 1, 0, 0);
+	layerCtx.globalCompositeOperation = 'copy';
+	layerCtx.drawImage(paintBaselineCanvas, 0, 0);
+	layerCtx.globalCompositeOperation = clip ? 'source-atop' : 'source-over';
+	layerCtx.globalAlpha = strokeAlpha;
+	layerCtx.drawImage(paintBuffer, 0, 0);
+	layerCtx.globalAlpha = 1;
+	layerCtx.restore();
+}
+
+// (mixer brush helper removed along with the mixer/paint/watercolor UI tools — the legacy
+// renderStrokeToCtx branch still handles those types for stored-data backward compat.)
+
+// Mixer brush is rendered through the unified pen/paint/watercolor/mixer branch in
+// renderStrokeToCtx (segment-level pixel sampling + RGB lerp into a buffer that composites
+// at strokeAlpha) — no separate helper needed.
+
 function renderStrokeToCtx(
 	c: CanvasRenderingContext2D,
 	stroke: ChatDrawingStroke,
@@ -1512,47 +1650,117 @@ function renderStrokeToCtx(
 		return;
 	}
 
+	// Pen / paint / watercolor / mixer all route through a unified two-pass renderer that
+	// stamps segments onto a throwaway buffer at full alpha and composites the union shape
+	// at the stroke's transparency in one step. Segment-level alpha overlap (the "string of
+	// beads" artefact) disappears because identical-colour overlap at alpha 1 is idempotent.
+	// Watercolor adds shadowBlur per segment for soft edges, mixer samples the target ctx
+	// at each midpoint and lerps the brush colour with the sampled pixel.
+	if (stroke.tool === 'pen' || stroke.tool === 'paint' || stroke.tool === 'watercolor' || stroke.tool === 'mixer' || stroke.tool === 'airbrush') {
+		const tmp = document.createElement('canvas');
+		tmp.width = CANVAS_W;
+		tmp.height = CANVAS_H;
+		const tctx = tmp.getContext('2d');
+		if (!tctx) return;
+		const [r, g, b, alphaByte] = parseColorRGBA(stroke.color);
+		const opaqueColor = `rgb(${r},${g},${b})`;
+		tctx.lineCap = 'round';
+		tctx.lineJoin = 'round';
+		tctx.globalAlpha = 1;
+		tctx.globalCompositeOperation = 'source-over';
+		if (stroke.tool === 'watercolor' || stroke.tool === 'airbrush') {
+			tctx.shadowColor = opaqueColor;
+			tctx.shadowOffsetX = 0;
+			tctx.shadowOffsetY = 0;
+		}
+		const baseWidth = Math.max(1, stroke.width * CANVAS_W);
+		// Airbrush uses the shadow-trick (when core off): source line is rendered off-canvas
+		// (-shadowDist on x) and shadowOffsetX brings the blurred shadow back into view, so
+		// only the soft halo is visible. With core on, the line draws at the original spot
+		// alongside its shadow halo. Hardness 0 = soft (large blur, thin core); hardness 1
+		// = sharp (no blur, full width).
+		const SHADOW_TRICK_DIST = CANVAS_W * 2;
+		const abHardness = stroke.tool === 'airbrush' ? Math.max(0, Math.min(1, stroke.hardness ?? 0.3)) : 0;
+		const abCore = stroke.tool === 'airbrush' && stroke.core === true;
+		const abBlurFactor = (1 - abHardness) * 1.5;
+		const abLineFactor = 0.3 + 0.7 * abHardness;
+		const drawOne = (ax: number, ay: number, bx: number, by: number, avg: number) => {
+			let drawAx = ax, drawBx = bx;
+			if (stroke.tool === 'airbrush') {
+				tctx.shadowOffsetY = 0;
+				tctx.shadowBlur = baseWidth * abBlurFactor * (0.5 + 0.5 * avg);
+				tctx.lineWidth = Math.max(0.5, baseWidth * abLineFactor * (0.5 + 0.5 * avg));
+				if (abCore) {
+					tctx.shadowOffsetX = 0;
+				} else {
+					tctx.shadowOffsetX = SHADOW_TRICK_DIST;
+					drawAx = ax - SHADOW_TRICK_DIST;
+					drawBx = bx - SHADOW_TRICK_DIST;
+				}
+			} else if (stroke.tool === 'watercolor') {
+				tctx.shadowOffsetX = 0;
+				tctx.shadowOffsetY = 0;
+				tctx.shadowBlur = baseWidth * 0.7;
+				tctx.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * avg));
+			} else {
+				tctx.lineWidth = Math.max(0.5, baseWidth * avg);
+			}
+			if (stroke.tool === 'mixer') {
+				const mx = Math.max(0, Math.min(CANVAS_W - 1, Math.round((ax + bx) / 2)));
+				const my = Math.max(0, Math.min(CANVAS_H - 1, Math.round((ay + by) / 2)));
+				let mr = r, mg = g, mb = b;
+				try {
+					const data = c.getImageData(mx, my, 1, 1).data;
+					const w = 0.5 * (data[3] / 255);
+					mr = Math.round(r * (1 - w) + data[0] * w);
+					mg = Math.round(g * (1 - w) + data[1] * w);
+					mb = Math.round(b * (1 - w) + data[2] * w);
+				} catch { /* tainted canvas — fall back to brush colour */ }
+				tctx.strokeStyle = `rgb(${mr},${mg},${mb})`;
+			} else {
+				tctx.strokeStyle = opaqueColor;
+			}
+			tctx.beginPath();
+			tctx.moveTo(drawAx, ay);
+			tctx.lineTo(drawBx, by);
+			tctx.stroke();
+		};
+		const p0 = stroke.points[0];
+		if (stroke.points.length === 1) {
+			const pr = p0.length >= 3 ? (p0[2] as number) : 1;
+			drawOne(p0[0] * CANVAS_W, p0[1] * CANVAS_H, p0[0] * CANVAS_W + 0.01, p0[1] * CANVAS_H + 0.01, pr);
+		} else {
+			for (let i = 1; i < stroke.points.length; i++) {
+				const a = stroke.points[i - 1];
+				const b2 = stroke.points[i];
+				const pa = a.length >= 3 ? (a[2] as number) : 1;
+				const pb = b2.length >= 3 ? (b2[2] as number) : 1;
+				const avg = (pa + pb) / 2;
+				drawOne(a[0] * CANVAS_W, a[1] * CANVAS_H, b2[0] * CANVAS_W, b2[1] * CANVAS_H, avg);
+			}
+		}
+		c.save();
+		c.globalCompositeOperation = stroke.clip ? 'source-atop' : 'source-over';
+		c.globalAlpha = alphaByte / 255;
+		c.drawImage(tmp, 0, 0);
+		c.restore();
+		return;
+	}
+
+	// Eraser is the only remaining tool here. Punches alpha → 0 on the target layer so
+	// underlying layers show through. Single-pass with destination-out at full alpha — no
+	// bead artefact possible because alpha 1 erasure overwrites consistently.
 	c.save();
 	c.lineCap = 'round';
 	c.lineJoin = 'round';
-	const isPaint = stroke.tool === 'paint';
-	const isEraser = stroke.tool === 'eraser';
-	const isWatercolor = stroke.tool === 'watercolor';
-	if (isEraser) {
-		// Clear pixels on the layer (alpha → 0). The composite will show whatever layer is
-		// beneath (or the white background), so it reads as "erased".
-		c.globalCompositeOperation = 'destination-out';
-		c.strokeStyle = '#000';
-		c.globalAlpha = 1;
-	} else if (isWatercolor) {
-		// Watercolor: shadowBlur gives the bleeding feathered edge; per-segment alpha is low
-		// so retracing / overlapping segments build up depth like layered pigment. clip is
-		// ignored (source-over keeps the halo visible on transparent layers).
-		c.globalCompositeOperation = 'source-over';
-		c.strokeStyle = stroke.color;
-		c.shadowColor = stroke.color;
-		c.shadowOffsetX = 0;
-		c.shadowOffsetY = 0;
-	} else if (stroke.clip) {
-		// Lineart clip: paint only where the target already has pixels (source-atop).
-		c.globalCompositeOperation = 'source-atop';
-		c.strokeStyle = stroke.color;
-	} else {
-		c.strokeStyle = stroke.color;
-	}
+	c.globalCompositeOperation = 'destination-out';
+	c.strokeStyle = '#000';
+	c.globalAlpha = 1;
 	const baseWidth = Math.max(1, stroke.width * CANVAS_W);
-
 	const p0 = stroke.points[0];
 	if (stroke.points.length === 1) {
 		const pr = p0.length >= 3 ? (p0[2] as number) : 1;
-		if (isWatercolor) {
-			c.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * pr));
-			c.shadowBlur = baseWidth * 0.7;
-			c.globalAlpha = 0.10 + 0.10 * pr;
-		} else {
-			c.lineWidth = Math.max(0.5, baseWidth * pr);
-			if (!isEraser) c.globalAlpha = isPaint ? 0.25 + 0.55 * pr : 1;
-		}
+		c.lineWidth = Math.max(0.5, baseWidth * pr);
 		c.beginPath();
 		c.moveTo(p0[0] * CANVAS_W, p0[1] * CANVAS_H);
 		c.lineTo(p0[0] * CANVAS_W + 0.01, p0[1] * CANVAS_H + 0.01);
@@ -1564,14 +1772,7 @@ function renderStrokeToCtx(
 			const pa = a.length >= 3 ? (a[2] as number) : 1;
 			const pb = b.length >= 3 ? (b[2] as number) : 1;
 			const avg = (pa + pb) / 2;
-			if (isWatercolor) {
-				c.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * avg));
-				c.shadowBlur = baseWidth * 0.7;
-				c.globalAlpha = 0.10 + 0.10 * avg;
-			} else {
-				c.lineWidth = Math.max(0.5, baseWidth * avg);
-				if (!isEraser) c.globalAlpha = isPaint ? 0.25 + 0.55 * avg : 1;
-			}
+			c.lineWidth = Math.max(0.5, baseWidth * avg);
 			c.beginPath();
 			c.moveTo(a[0] * CANVAS_W, a[1] * CANVAS_H);
 			c.lineTo(b[0] * CANVAS_W, b[1] * CANVAS_H);
@@ -2038,19 +2239,47 @@ function onPointerDown(ev: PointerEvent) {
 		return;
 	}
 
+	const usesBrushBuffer = tool.value === 'pen' || tool.value === 'airbrush';
+	if (usesBrushBuffer) {
+		// All brush-style tools route through the live buffer to suppress the bead artefact.
+		startPaintLive(layerForStroke);
+	}
+
 	rawBuffer = [point];
 	currentPoints = [point];
-	// Paint a single dot immediately so a tap/click leaves a mark even without a move.
-	// By this point tool.value has been narrowed to pen/eraser/paint — fill/spoit/line
-	// all return earlier in this function.
-	renderStroke({
-		points: [point],
-		color: composedColor.value,
-		width: activeBrushWidth.value / CANVAS_W,
-		tool: tool.value,
-		layer: layerForStroke,
-		...(effectiveClipForNewStroke() ? { clip: true } : {}),
-	});
+	// Stamp the initial dot so a tap/click without movement still leaves a mark.
+	if (usesBrushBuffer) {
+		const ix = point[0] * CANVAS_W;
+		const iy = point[1] * CANVAS_H;
+		const ipr = point[2];
+		const baseLw = Math.max(0.5, activeBrushWidth.value * ipr);
+		const [pr, pg, pbb, palpha] = parseColorRGBA(composedColor.value);
+		const opaque = `rgb(${pr},${pg},${pbb})`;
+		const clip = effectiveClipForNewStroke();
+		const alpha = palpha / 255;
+		if (tool.value === 'airbrush') {
+			const hardness = airbrushHardness.value;
+			const showCore = airbrushShowCore.value;
+			const blurFactor = (1 - hardness) * 1.5;
+			const lineFactor = 0.3 + 0.7 * hardness;
+			const albLw = Math.max(0.5, activeBrushWidth.value * lineFactor * (0.5 + 0.5 * ipr));
+			const blur = activeBrushWidth.value * blurFactor * (0.5 + 0.5 * ipr);
+			const offsetX = showCore ? 0 : CANVAS_W * 2;
+			paintLiveDrawSegment(ix - offsetX, iy, ix - offsetX + 0.01, iy + 0.01, albLw, opaque, alpha, clip, { color: opaque, blur, offsetX, offsetY: 0 });
+		} else {
+			paintLiveDrawSegment(ix, iy, ix + 0.01, iy + 0.01, baseLw, opaque, alpha, clip);
+		}
+		recompositeDisplay();
+	} else {
+		renderStroke({
+			points: [point],
+			color: composedColor.value,
+			width: activeBrushWidth.value / CANVAS_W,
+			tool: tool.value,
+			layer: layerForStroke,
+			...(effectiveClipForNewStroke() ? { clip: true } : {}),
+		});
+	}
 }
 
 function drawLinePreview(start: [number, number, number], end: [number, number, number]) {
@@ -2113,34 +2342,40 @@ function onPointerMove(ev: PointerEvent) {
 
 	const avgP = (last[2] + next[2]) / 2;
 	const c = getLayerCtx(preStrokeLayerTarget ?? currentLayer.value);
+	if (tool.value === 'pen' || tool.value === 'airbrush') {
+		const ax = last[0] * CANVAS_W;
+		const ay = last[1] * CANVAS_H;
+		const bx = next[0] * CANVAS_W;
+		const by = next[1] * CANVAS_H;
+		const baseLw = Math.max(0.5, activeBrushWidth.value * avgP);
+		const [pr, pg, pbb, palpha] = parseColorRGBA(composedColor.value);
+		const opaque = `rgb(${pr},${pg},${pbb})`;
+		const clip = effectiveClipForNewStroke();
+		const alpha = palpha / 255;
+		if (tool.value === 'airbrush') {
+			const hardness = airbrushHardness.value;
+			const showCore = airbrushShowCore.value;
+			const blurFactor = (1 - hardness) * 1.5;
+			const lineFactor = 0.3 + 0.7 * hardness;
+			const albLw = Math.max(0.5, activeBrushWidth.value * lineFactor * (0.5 + 0.5 * avgP));
+			const blur = activeBrushWidth.value * blurFactor * (0.5 + 0.5 * avgP);
+			const offsetX = showCore ? 0 : CANVAS_W * 2;
+			paintLiveDrawSegment(ax - offsetX, ay, bx - offsetX, by, albLw, opaque, alpha, clip, { color: opaque, blur, offsetX, offsetY: 0 });
+		} else {
+			paintLiveDrawSegment(ax, ay, bx, by, baseLw, opaque, alpha, clip);
+		}
+		recompositeDisplay();
+		currentPoints.push(next);
+		return;
+	}
+	// Eraser only path — alpha 1 destination-out, no bead artefact possible.
 	c.save();
 	c.lineCap = 'round';
 	c.lineJoin = 'round';
-	if (tool.value === 'eraser') {
-		c.globalCompositeOperation = 'destination-out';
-		c.strokeStyle = '#000';
-		c.globalAlpha = 1;
-		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
-	} else if (tool.value === 'watercolor') {
-		// Match renderStrokeToCtx watercolor branch so live preview matches the committed render.
-		c.globalCompositeOperation = 'source-over';
-		c.strokeStyle = composedColor.value;
-		c.shadowColor = composedColor.value;
-		c.shadowOffsetX = 0;
-		c.shadowOffsetY = 0;
-		c.shadowBlur = activeBrushWidth.value * 0.7;
-		c.globalAlpha = 0.10 + 0.10 * avgP;
-		c.lineWidth = Math.max(0.5, activeBrushWidth.value * (0.4 + 0.6 * avgP));
-	} else if (effectiveClipForNewStroke()) {
-		c.globalCompositeOperation = 'source-atop';
-		c.strokeStyle = composedColor.value;
-		c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
-		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
-	} else {
-		c.strokeStyle = composedColor.value;
-		c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
-		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
-	}
+	c.globalCompositeOperation = 'destination-out';
+	c.strokeStyle = '#000';
+	c.globalAlpha = 1;
+	c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 	c.beginPath();
 	c.moveTo(last[0] * CANVAS_W, last[1] * CANVAS_H);
 	c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
@@ -2216,33 +2451,38 @@ function onPointerUp(ev: PointerEvent) {
 		if (dx * dx + dy * dy < 1) continue;
 		const avgP = (last[2] + next[2]) / 2;
 		const c = getLayerCtx(preStrokeLayerTarget ?? currentLayer.value);
+		if (tool.value === 'pen' || tool.value === 'airbrush') {
+			const ax = last[0] * CANVAS_W;
+			const ay = last[1] * CANVAS_H;
+			const bx = next[0] * CANVAS_W;
+			const by = next[1] * CANVAS_H;
+			const baseLw = Math.max(0.5, activeBrushWidth.value * avgP);
+			const [pr, pg, pbb, palpha] = parseColorRGBA(composedColor.value);
+			const opaque = `rgb(${pr},${pg},${pbb})`;
+			const clip = effectiveClipForNewStroke();
+			const alpha = palpha / 255;
+			if (tool.value === 'airbrush') {
+				const hardness = airbrushHardness.value;
+				const showCore = airbrushShowCore.value;
+				const blurFactor = (1 - hardness) * 1.5;
+				const lineFactor = 0.3 + 0.7 * hardness;
+				const albLw = Math.max(0.5, activeBrushWidth.value * lineFactor * (0.5 + 0.5 * avgP));
+				const blur = activeBrushWidth.value * blurFactor * (0.5 + 0.5 * avgP);
+				const offsetX = showCore ? 0 : CANVAS_W * 2;
+				paintLiveDrawSegment(ax - offsetX, ay, bx - offsetX, by, albLw, opaque, alpha, clip, { color: opaque, blur, offsetX, offsetY: 0 });
+			} else {
+				paintLiveDrawSegment(ax, ay, bx, by, baseLw, opaque, alpha, clip);
+			}
+			currentPoints.push(next);
+			continue;
+		}
 		c.save();
 		c.lineCap = 'round';
 		c.lineJoin = 'round';
-		if (tool.value === 'eraser') {
-			c.globalCompositeOperation = 'destination-out';
-			c.strokeStyle = '#000';
-			c.globalAlpha = 1;
-			c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
-		} else if (tool.value === 'watercolor') {
-			c.globalCompositeOperation = 'source-over';
-			c.strokeStyle = composedColor.value;
-			c.shadowColor = composedColor.value;
-			c.shadowOffsetX = 0;
-			c.shadowOffsetY = 0;
-			c.shadowBlur = activeBrushWidth.value * 0.7;
-			c.globalAlpha = 0.10 + 0.10 * avgP;
-			c.lineWidth = Math.max(0.5, activeBrushWidth.value * (0.4 + 0.6 * avgP));
-		} else if (effectiveClipForNewStroke()) {
-			c.globalCompositeOperation = 'source-atop';
-			c.strokeStyle = composedColor.value;
-			c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
-			c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
-		} else {
-			c.strokeStyle = composedColor.value;
-			c.globalAlpha = tool.value === 'paint' ? 0.25 + 0.55 * avgP : 1;
-			c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
-		}
+		c.globalCompositeOperation = 'destination-out';
+		c.strokeStyle = '#000';
+		c.globalAlpha = 1;
+		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 		c.beginPath();
 		c.moveTo(last[0] * CANVAS_W, last[1] * CANVAS_H);
 		c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
@@ -2260,10 +2500,9 @@ function onPointerUp(ev: PointerEvent) {
 
 	// tool.value is a ref so TS doesn't narrow across the earlier branches that return
 	// for line/fill/spoit — explicitly coerce to the committable tool set.
-	const commitTool: 'pen' | 'eraser' | 'paint' | 'watercolor' =
+	const commitTool: 'pen' | 'eraser' | 'airbrush' =
 		tool.value === 'eraser' ? 'eraser' :
-		tool.value === 'paint' ? 'paint' :
-		tool.value === 'watercolor' ? 'watercolor' :
+		tool.value === 'airbrush' ? 'airbrush' :
 		'pen';
 	const commitLayer = preStrokeLayerTarget ?? currentLayer.value;
 	const commitClip = effectiveClipForNewStroke() && commitTool !== 'eraser';
@@ -2275,6 +2514,7 @@ function onPointerUp(ev: PointerEvent) {
 		tool: commitTool,
 		layer: commitLayer,
 		...(commitClip ? { clip: true } : {}),
+		...(commitTool === 'airbrush' ? { hardness: airbrushHardness.value, ...(airbrushShowCore.value ? { core: true } : {}) } : {}),
 	};
 	currentPoints = [];
 

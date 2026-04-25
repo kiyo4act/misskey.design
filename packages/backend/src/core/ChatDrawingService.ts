@@ -72,12 +72,14 @@ function sanitizeStroke(input: unknown): ChatDrawingStroke | null {
 		? Math.max(MIN_STROKE_WIDTH, Math.min(MAX_STROKE_WIDTH, widthNum))
 		: 0.01;
 
-	const tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' =
+	const tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' | 'mixer' | 'airbrush' =
 		raw.tool === 'eraser' ? 'eraser' :
 		raw.tool === 'fill' ? 'fill' :
 		raw.tool === 'paint' ? 'paint' :
 		raw.tool === 'watercolor' ? 'watercolor' :
 		raw.tool === 'text' ? 'text' :
+		raw.tool === 'mixer' ? 'mixer' :
+		raw.tool === 'airbrush' ? 'airbrush' :
 		'pen';
 
 	const id = typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(raw.id) ? raw.id : undefined;
@@ -94,7 +96,15 @@ function sanitizeStroke(input: unknown): ChatDrawingStroke | null {
 	}
 	if (tool === 'text' && !text) return null;
 
-	return { id, points, color, width, tool, layer, clip, text };
+	let hardness: number | undefined;
+	let core: boolean | undefined;
+	if (tool === 'airbrush') {
+		const h = Number(raw.hardness);
+		hardness = Number.isFinite(h) ? Math.max(0, Math.min(1, h)) : undefined;
+		core = raw.core === true ? true : undefined;
+	}
+
+	return { id, points, color, width, tool, layer, clip, text, hardness, core };
 }
 
 function hexToRgba(hex: string): [number, number, number, number] {
@@ -410,6 +420,104 @@ export function sanitizeStrokes(input: unknown): ChatDrawingStroke[] {
 	return out;
 }
 
+// Unified server-side renderer for pen / paint / watercolor / mixer — must match the
+// frontend's two-pass rendering. Stamp every segment onto a throwaway canvas at full
+// alpha (with shadowBlur for watercolor; with sampled-and-mixed colour for mixer), then
+// composite onto the target with the stroke's transparency in one go. Kills the bead
+// artefact at segment endpoints when alpha < 1.
+function renderBrushStrokeServer(
+	ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>,
+	stroke: ChatDrawingStroke,
+	width: number,
+	height: number,
+): void {
+	if (stroke.points.length === 0) return;
+	const tmp: Canvas = createCanvas(width, height);
+	const tctx = tmp.getContext('2d');
+	const [r, g, b, alphaByte] = hexToRgba(stroke.color);
+	const opaqueColor = `rgb(${r},${g},${b})`;
+	tctx.lineCap = 'round';
+	tctx.lineJoin = 'round';
+	tctx.globalAlpha = 1;
+	tctx.globalCompositeOperation = 'source-over';
+	const isWatercolor = stroke.tool === 'watercolor';
+	const isAirbrush = stroke.tool === 'airbrush';
+	const isMixer = stroke.tool === 'mixer';
+	if (isWatercolor || isAirbrush) {
+		tctx.shadowColor = opaqueColor;
+		tctx.shadowOffsetX = 0;
+		tctx.shadowOffsetY = 0;
+	}
+	const baseWidth = Math.max(1, stroke.width * width);
+	// Airbrush shadow-trick: render the source line off-canvas, offset shadow back into
+	// view → halo without a visible core line. Must match the frontend's offset distance.
+	const SHADOW_TRICK_DIST = width * 2;
+	const abHardness = isAirbrush ? Math.max(0, Math.min(1, stroke.hardness ?? 0.3)) : 0;
+	const abCore = isAirbrush && stroke.core === true;
+	const abBlurFactor = (1 - abHardness) * 1.5;
+	const abLineFactor = 0.3 + 0.7 * abHardness;
+	const drawOne = (ax: number, ay: number, bx: number, by: number, avg: number) => {
+		let drawAx = ax, drawBx = bx;
+		if (isAirbrush) {
+			tctx.shadowOffsetY = 0;
+			tctx.shadowBlur = baseWidth * abBlurFactor * (0.5 + 0.5 * avg);
+			tctx.lineWidth = Math.max(0.5, baseWidth * abLineFactor * (0.5 + 0.5 * avg));
+			if (abCore) {
+				tctx.shadowOffsetX = 0;
+			} else {
+				tctx.shadowOffsetX = SHADOW_TRICK_DIST;
+				drawAx = ax - SHADOW_TRICK_DIST;
+				drawBx = bx - SHADOW_TRICK_DIST;
+			}
+		} else if (isWatercolor) {
+			tctx.shadowOffsetX = 0;
+			tctx.shadowOffsetY = 0;
+			tctx.shadowBlur = baseWidth * 0.7;
+			tctx.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * avg));
+		} else {
+			tctx.lineWidth = Math.max(0.5, baseWidth * avg);
+		}
+		if (isMixer) {
+			const mx = Math.max(0, Math.min(width - 1, Math.round((ax + bx) / 2)));
+			const my = Math.max(0, Math.min(height - 1, Math.round((ay + by) / 2)));
+			let mr = r, mg = g, mb = b;
+			try {
+				const data = ctx.getImageData(mx, my, 1, 1).data;
+				const w = 0.5 * (data[3] / 255);
+				mr = Math.round(r * (1 - w) + data[0] * w);
+				mg = Math.round(g * (1 - w) + data[1] * w);
+				mb = Math.round(b * (1 - w) + data[2] * w);
+			} catch { /* fall back to brush colour */ }
+			tctx.strokeStyle = `rgb(${mr},${mg},${mb})`;
+		} else {
+			tctx.strokeStyle = opaqueColor;
+		}
+		tctx.beginPath();
+		tctx.moveTo(drawAx, ay);
+		tctx.lineTo(drawBx, by);
+		tctx.stroke();
+	};
+	const p0 = stroke.points[0];
+	if (stroke.points.length === 1) {
+		const pr = p0.length >= 3 ? p0[2]! : 1;
+		drawOne(p0[0] * width, p0[1] * height, p0[0] * width + 0.01, p0[1] * height + 0.01, pr);
+	} else {
+		for (let i = 1; i < stroke.points.length; i++) {
+			const a = stroke.points[i - 1];
+			const b2 = stroke.points[i];
+			const pa = a.length >= 3 ? a[2]! : 1;
+			const pb = b2.length >= 3 ? b2[2]! : 1;
+			const avg = (pa + pb) / 2;
+			drawOne(a[0] * width, a[1] * height, b2[0] * width, b2[1] * height, avg);
+		}
+	}
+	ctx.save();
+	ctx.globalCompositeOperation = stroke.clip ? 'source-atop' : 'source-over';
+	ctx.globalAlpha = alphaByte / 255;
+	ctx.drawImage(tmp, 0, 0);
+	ctx.restore();
+}
+
 function renderOneStroke(
 	ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>,
 	stroke: ChatDrawingStroke,
@@ -466,49 +574,23 @@ function renderOneStroke(
 			return;
 		}
 
+		if (stroke.tool === 'pen' || stroke.tool === 'paint' || stroke.tool === 'watercolor' || stroke.tool === 'mixer' || stroke.tool === 'airbrush') {
+			renderBrushStrokeServer(ctx, stroke, width, height);
+			return;
+		}
+
+		// Eraser only path — destination-out at full alpha, no bead artefact possible.
 		ctx.save();
 		ctx.lineCap = 'round';
 		ctx.lineJoin = 'round';
-		const isPaint = stroke.tool === 'paint';
-		const isEraser = stroke.tool === 'eraser';
-		const isWatercolor = stroke.tool === 'watercolor';
-		if (isEraser) {
-			// Clear pixels (sets alpha to 0) so an underlying layer shows through in the composite.
-			ctx.globalCompositeOperation = 'destination-out';
-			ctx.strokeStyle = '#000';
-			ctx.globalAlpha = 1;
-		} else if (isWatercolor) {
-			// Watercolor: feathered soft edge via shadowBlur, low per-segment alpha so overlapping
-			// passes build up depth — the hallmark of layered watercolor pigment. clip is ignored
-			// (source-over is required for the bleed halo to land on transparent layers).
-			ctx.globalCompositeOperation = 'source-over';
-			ctx.strokeStyle = stroke.color;
-			ctx.shadowColor = stroke.color;
-			ctx.shadowOffsetX = 0;
-			ctx.shadowOffsetY = 0;
-		} else if (stroke.clip) {
-			// Lineart clipping: only paint where the target layer already has pixels, so the
-			// stroke recolors the existing lineart (or main/draft) rather than painting new
-			// shapes next to it. Fill/eraser ignore this flag — it's only meaningful for
-			// pen/paint-style strokes.
-			ctx.globalCompositeOperation = 'source-atop';
-			ctx.strokeStyle = stroke.color;
-		} else {
-			ctx.strokeStyle = stroke.color;
-		}
+		ctx.globalCompositeOperation = 'destination-out';
+		ctx.strokeStyle = '#000';
+		ctx.globalAlpha = 1;
 		const baseWidth = Math.max(1, stroke.width * width);
-
 		const p0 = stroke.points[0];
 		if (stroke.points.length === 1) {
 			const pr = p0.length >= 3 ? p0[2]! : 1;
-			if (isWatercolor) {
-				ctx.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * pr));
-				ctx.shadowBlur = baseWidth * 0.7;
-				ctx.globalAlpha = 0.10 + 0.10 * pr;
-			} else {
-				ctx.lineWidth = Math.max(0.5, baseWidth * pr);
-				if (!isEraser) ctx.globalAlpha = isPaint ? 0.25 + 0.55 * pr : 1;
-			}
+			ctx.lineWidth = Math.max(0.5, baseWidth * pr);
 			ctx.beginPath();
 			ctx.moveTo(p0[0] * width, p0[1] * height);
 			ctx.lineTo(p0[0] * width + 0.01, p0[1] * height + 0.01);
@@ -520,14 +602,7 @@ function renderOneStroke(
 				const pa = a.length >= 3 ? a[2]! : 1;
 				const pb = b.length >= 3 ? b[2]! : 1;
 				const avg = (pa + pb) / 2;
-				if (isWatercolor) {
-					ctx.lineWidth = Math.max(0.5, baseWidth * (0.4 + 0.6 * avg));
-					ctx.shadowBlur = baseWidth * 0.7;
-					ctx.globalAlpha = 0.10 + 0.10 * avg;
-				} else {
-					ctx.lineWidth = Math.max(0.5, baseWidth * avg);
-					if (!isEraser) ctx.globalAlpha = isPaint ? 0.25 + 0.55 * avg : 1;
-				}
+				ctx.lineWidth = Math.max(0.5, baseWidth * avg);
 				ctx.beginPath();
 				ctx.moveTo(a[0] * width, a[1] * height);
 				ctx.lineTo(b[0] * width, b[1] * height);

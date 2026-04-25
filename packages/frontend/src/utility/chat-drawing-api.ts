@@ -11,10 +11,15 @@ export type ChatDrawingStroke = {
 	points: number[][];
 	color: string;
 	width: number;
-	tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text';
+	tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' | 'mixer' | 'airbrush';
 	layer?: 'main' | 'draft' | 'lineart';
 	clip?: boolean;
 	text?: string;
+	// Airbrush-only: 0..1, controls the blur/spread ratio (0 = max bleed, 1 = sharp).
+	hardness?: number;
+	// Airbrush-only: when true, the source line itself is also drawn (in addition to the
+	// halo). Default behaviour is shadow-only.
+	core?: boolean;
 };
 
 export type ChatDrawingLite = Misskey.entities.ChatDrawingLite;

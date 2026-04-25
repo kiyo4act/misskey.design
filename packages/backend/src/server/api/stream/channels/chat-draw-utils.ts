@@ -13,10 +13,12 @@ export type SanitizedDrawStroke = {
 	points: number[][];
 	color: string;
 	width: number;
-	tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text';
+	tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' | 'mixer' | 'airbrush';
 	layer?: 'main' | 'draft' | 'lineart';
 	clip?: boolean;
 	text?: string;
+	hardness?: number;
+	core?: boolean;
 };
 
 export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
@@ -52,12 +54,14 @@ export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
 		? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, widthNum))
 		: 0.01;
 
-	const tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' =
+	const tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' | 'mixer' | 'airbrush' =
 		raw.tool === 'eraser' ? 'eraser' :
 		raw.tool === 'fill' ? 'fill' :
 		raw.tool === 'paint' ? 'paint' :
 		raw.tool === 'watercolor' ? 'watercolor' :
 		raw.tool === 'text' ? 'text' :
+		raw.tool === 'mixer' ? 'mixer' :
+		raw.tool === 'airbrush' ? 'airbrush' :
 		'pen';
 
 	const id = typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(raw.id) ? raw.id : undefined;
@@ -75,5 +79,13 @@ export function sanitizeDrawStroke(input: unknown): SanitizedDrawStroke | null {
 	}
 	if (tool === 'text' && !text) return null;
 
-	return { id, points, color, width, tool, layer, clip, text };
+	let hardness: number | undefined;
+	let core: boolean | undefined;
+	if (tool === 'airbrush') {
+		const h = Number(raw.hardness);
+		hardness = Number.isFinite(h) ? Math.max(0, Math.min(1, h)) : undefined;
+		core = raw.core === true ? true : undefined;
+	}
+
+	return { id, points, color, width, tool, layer, clip, text, hardness, core };
 }
