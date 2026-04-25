@@ -4,7 +4,7 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import type { InstancesRepository, NoteReactionsRepository } from '@/models/_.js';
+import type { InstancesRepository } from '@/models/_.js';
 import { Endpoint } from '@/server/api/endpoint-base.js';
 import { DI } from '@/di-symbols.js';
 import NotesChart from '@/core/chart/charts/notes.js';
@@ -63,9 +63,6 @@ export default class extends Endpoint<typeof meta, typeof paramDef> { // eslint-
 		@Inject(DI.instancesRepository)
 		private instancesRepository: InstancesRepository,
 
-		@Inject(DI.noteReactionsRepository)
-		private noteReactionsRepository: NoteReactionsRepository,
-
 		private notesChart: NotesChart,
 		private usersChart: UsersChart,
 	) {
@@ -78,23 +75,13 @@ export default class extends Endpoint<typeof meta, typeof paramDef> { // eslint-
 			const usersCount = usersChart.local.total[0] + usersChart.remote.total[0];
 			const originalUsersCount = usersChart.local.total[0];
 
-			const [
-				reactionsCount,
-				//originalReactionsCount,
-				instances,
-			] = await Promise.all([
-				this.noteReactionsRepository.count({ cache: 3600000 }), // 1 hour
-				//this.noteReactionsRepository.count({ where: { userHost: IsNull() }, cache: 3600000 }),
-				this.instancesRepository.count({ cache: 3600000 }),
-			]);
+			const instances = await this.instancesRepository.count({ cache: 3600000 });
 
 			return {
 				notesCount,
 				originalNotesCount,
 				usersCount,
 				originalUsersCount,
-				reactionsCount,
-				//originalReactionsCount,
 				instances,
 				driveUsageLocal: 0,
 				driveUsageRemote: 0,
