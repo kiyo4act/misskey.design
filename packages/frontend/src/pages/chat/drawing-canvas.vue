@@ -178,6 +178,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 						@pointercancel="onPointerUp"
 						@selectstart.prevent
 						@dragstart.prevent
+						@dblclick.prevent
 					></canvas>
 				</div>
 			</div>
@@ -1562,6 +1563,9 @@ function pickColorAt(nx: number, ny: number): string | null {
 function onPointerDown(ev: PointerEvent) {
 	if (isDrawingStroke || loading.value) return;
 	ev.preventDefault();
+	// iPadOS may have started a system selection (rectangle/loupe) on a prior double-tap;
+	// clear it so it doesn't linger over the canvas while drawing.
+	window.getSelection()?.removeAllRanges();
 
 	const point = canvasPointToNormalized(ev);
 
