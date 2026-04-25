@@ -1,0 +1,57 @@
+{
+  "family": "misskey-design",
+  "taskRoleArn": "arn:aws:iam::355539329542:role/misskey-design-task",
+  "executionRoleArn": "arn:aws:iam::355539329542:role/misskey-design-task-execution",
+  "networkMode": "bridge",
+  "requiresCompatibilities": ["EC2"],
+  "cpu": "1024",
+  "memory": "1500",
+  "containerDefinitions": [
+    {
+      "name": "web",
+      "image": "355539329542.dkr.ecr.ap-northeast-1.amazonaws.com/misskey-design:latest",
+      "cpu": 1024,
+      "memory": 1500,
+      "memoryReservation": 1200,
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "hostPort": 0,
+          "protocol": "tcp",
+          "name": "web"
+        }
+      ],
+      "command": [
+        "bash",
+        "-c",
+        "set -eu; mkdir -p /misskey/.config; printf '%s' \"$MISSKEY_DEFAULT_YML\" > /misskey/.config/default.yml; exec pnpm run migrateandstart"
+      ],
+      "secrets": [
+        {
+          "name": "MISSKEY_DEFAULT_YML",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:355539329542:secret:misskey-design/default-yml-1b4mEI"
+        }
+      ],
+      "linuxParameters": {
+        "initProcessEnabled": true
+      },
+      "stopTimeout": 60,
+      "healthCheck": {
+        "command": ["CMD-SHELL", "/bin/bash /misskey/healthcheck.sh"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 90
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/misskey-design",
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-stream-prefix": "web"
+        }
+      }
+    }
+  ]
+}

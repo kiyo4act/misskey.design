@@ -1,4 +1,4 @@
-name: Build and push to ECR
+name: Build and deploy to ECS
 
 on:
   push:
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
@@ -37,7 +37,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push
+      - name: Build and push image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -50,6 +51,22 @@ jobs:
           cache-from: type=registry,ref=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:buildcache
           cache-to: type=registry,ref=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
 
-      - name: Output image URI
-        run: |
-          echo "Image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+      - name: Render task definition with new image
+        id: render-taskdef
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: .github/taskdef.json
+          container-name: web
+          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+      - name: Deploy via CodeDeploy (blue/green)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-taskdef.outputs.task-definition }}
+          service: misskey-design
+          cluster: misskey-design
+          codedeploy-appspec: .github/appspec.yml
+          codedeploy-application: misskey-design
+          codedeploy-deployment-group: misskey-design
+          wait-for-service-stability: true
+          wait-for-minutes: 30
