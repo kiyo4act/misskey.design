@@ -52,11 +52,19 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 			<button
 				class="_button"
-				:class="[$style.toolButton, lineartClipEnabled ? $style.toolActive : null]"
-				title="線画クリップ: ペン/厚塗り/直線を線画レイヤーの既存ピクセルのみに重ねる"
-				@click="lineartClipEnabled = !lineartClipEnabled"
+				:class="[$style.toolButton, clipMode === 'lineart' ? $style.toolActive : null]"
+				title="線画クリップ: ペン/エアブラシ/直線を線画レイヤーの既存ピクセルのみに重ねる"
+				@click="clipMode = clipMode === 'lineart' ? 'none' : 'lineart'"
 			>
 				<i class="ti ti-link"></i>
+			</button>
+			<button
+				class="_button"
+				:class="[$style.toolButton, clipMode === 'main' ? $style.toolActive : null]"
+				title="塗りクリップ: ペン/エアブラシ/直線をメインレイヤーの既存ピクセルのみに重ねる"
+				@click="clipMode = clipMode === 'main' ? 'none' : 'main'"
+			>
+				<i class="ti ti-paint-filled"></i>
 			</button>
 
 			<button
@@ -406,7 +414,7 @@ watch(tool, (newT: string, oldT: string) => {
 		textCursor.value = null;
 	}
 });
-const currentLayer = ref<'main' | 'draft' | 'lineart'>('main');
+const currentLayer = ref<'main' | 'draft' | 'lineart'>('draft');
 const draftOpacity = ref(0.4);
 const zoom = ref(1);
 const MIN_ZOOM = 0.25;
@@ -452,7 +460,9 @@ const width = ref<number>(6);
 const eraserWidth = ref<number>(20);
 // "Lineart clip" mode — when on, pen/paint/line strokes go to the lineart layer with
 // `source-atop`, so they only recolor existing line pixels rather than painting new ones.
-const lineartClipEnabled = ref<boolean>(false);
+// Clip mode: 'none' (default), 'lineart' (paint only on lineart layer pixels), or 'main'
+// (paint only on main-layer fill pixels). The two clip modes are mutually exclusive.
+const clipMode = ref<'none' | 'lineart' | 'main'>('none');
 // Pen-tablet pressure sensitivity. Off forces every stroke to constant full pressure
 // (uniform line width / opacity), useful when tablet drivers jitter or the user just
 // wants even strokes.
@@ -470,13 +480,19 @@ const activeBrushWidth = computed<number>({
 
 // Which layer the next stroke lands on, honouring the lineart-clip override. Only pen/
 // paint/line make sense to clip; other tools ignore the flag.
+// Tools whose strokes can be clipped to an existing layer's content. fill/eraser/spoit/text
+// don't make sense for clip routing; line commits as a 2-point pen stroke so it follows
+// pen rules.
+const CLIP_ELIGIBLE_TOOLS = new Set(['pen', 'airbrush', 'line']);
+
 function effectiveLayerForNewStroke(): 'main' | 'draft' | 'lineart' {
-	if (lineartClipEnabled.value && (tool.value === 'pen' || tool.value === 'airbrush' || tool.value === 'line')) return 'lineart';
+	if (clipMode.value === 'lineart' && CLIP_ELIGIBLE_TOOLS.has(tool.value)) return 'lineart';
+	if (clipMode.value === 'main' && CLIP_ELIGIBLE_TOOLS.has(tool.value)) return 'main';
 	return currentLayer.value;
 }
 
 function effectiveClipForNewStroke(): boolean {
-	return lineartClipEnabled.value && (tool.value === 'pen' || tool.value === 'airbrush' || tool.value === 'line');
+	return clipMode.value !== 'none' && CLIP_ELIGIBLE_TOOLS.has(tool.value);
 }
 const saving = ref(false);
 const loading = ref(true);
