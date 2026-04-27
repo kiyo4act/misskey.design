@@ -2937,7 +2937,7 @@ export interface Locale extends ILocale {
      */
     "reportAbuseOf": ParameterizedString<"name">;
     /**
-     * 通報理由の詳細を記入してください。対象のノートやページなどがある場合はそのURLも記入してください。
+     * 通報理由の詳細を記入してください。対象のノートやページなどが他にもある場合そのURLも記入してください。二次創作・ファンアートのタグ記載漏れの際は該当する原作名やキャラ名を記載してください。
      */
     "fillAbuseReportDescription": string;
     /**
@@ -6668,7 +6668,7 @@ export interface Locale extends ILocale {
              */
             "social": string;
             /**
-             * ソーシャルタイムラインとローカルタイムラインのメディア付き投稿が両方表示されます。
+             * ソーシャルタイムラインとローカルタイムラインのメディア付き投稿を見られます。
              */
             "media": string;
             /**
@@ -6809,7 +6809,7 @@ export interface Locale extends ILocale {
          */
         "social": string;
         /**
-         * メディアタイムラインには、ホームタイムラインとローカルタイムラインのメディア付き投稿が両方表示されます。
+         * メディアタイムラインには、ソーシャルタイムラインとローカルタイムラインのメディア付き投稿が両方表示されます。
          */
         "media": string;
         /**

@@ -19,71 +19,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 	<div :class="$style.root" @contextmenu.prevent>
 		<!-- Row 1: tool palette + undo/redo + clear -->
+		<!-- Row 1: 色 / ツール選択 / 履歴 / レイヤー / 全消し -->
 		<div :class="$style.toolbar">
-			<div :class="$style.toolGroup">
-				<button class="_button" :class="[$style.toolButton, tool === 'pen' ? $style.toolActive : null]" title="ペン" @click="tool = 'pen'"><i class="ti ti-pencil"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'airbrush' ? $style.toolActive : null]" title="エアブラシ" @click="tool = 'airbrush'"><i class="ti ti-spray"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'text' ? $style.toolActive : null]" title="テキスト" @click="tool = 'text'"><i class="ti ti-typography"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'line' ? $style.toolActive : null]" title="直線" @click="tool = 'line'"><i class="ti ti-line"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'eraser' ? $style.toolActive : null]" title="消しゴム" @click="tool = 'eraser'"><i class="ti ti-eraser"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'fill' ? $style.toolActive : null]" title="塗りつぶし" @click="tool = 'fill'"><i class="ti ti-paint"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'spoit' ? $style.toolActive : null]" title="スポイト (Alt+クリック)" @click="tool = 'spoit'"><i class="ti ti-color-picker"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'hand' ? $style.toolActive : null]" title="手のひら (ドラッグ移動 / Shift+ドラッグ回転 / ホイールでズーム)" @click="tool = 'hand'"><i class="ti ti-hand-stop"></i></button>
-			</div>
-
-			<div :class="$style.separator"></div>
-
-			<div :class="$style.toolGroup">
-				<button class="_button" :class="$style.toolButton" :disabled="!canUndo" title="元に戻す (Ctrl+Z)" @click="undo"><i class="ti ti-arrow-back-up"></i></button>
-				<button class="_button" :class="$style.toolButton" :disabled="!canRedo" title="やり直し (Ctrl+Y)" @click="redo"><i class="ti ti-arrow-forward-up"></i></button>
-			</div>
-
-			<div :class="$style.separator"></div>
-
-			<button
-				class="_button"
-				:class="[$style.layerToggle, currentLayer !== 'main' ? $style.toolActive : null]"
-				:title="`編集中レイヤー: ${currentLayerLabel}（クリックで切替）`"
-				@click="toggleLayer"
-			>
-				<i class="ti ti-layers-subtract"></i>
-				<span :class="$style.layerToggleLabel">{{ currentLayerLabel }}</span>
-			</button>
-
-			<button
-				class="_button"
-				:class="[$style.toolButton, clipMode === 'lineart' ? $style.toolActive : null]"
-				title="線画クリップ: ペン/エアブラシ/直線を線画レイヤーの既存ピクセルのみに重ねる"
-				@click="clipMode = clipMode === 'lineart' ? 'none' : 'lineart'"
-			>
-				<i class="ti ti-link"></i>
-			</button>
-			<button
-				class="_button"
-				:class="[$style.toolButton, clipMode === 'main' ? $style.toolActive : null]"
-				title="塗りクリップ: ペン/エアブラシ/直線をメインレイヤーの既存ピクセルのみに重ねる"
-				@click="clipMode = clipMode === 'main' ? 'none' : 'main'"
-			>
-				<i class="ti ti-paint-filled"></i>
-			</button>
-
-			<button
-				class="_button"
-				:class="[$style.toolButton, pressureSensitivity ? $style.toolActive : null]"
-				:title="pressureSensitivity ? '筆圧検知: ON（クリックで OFF）' : '筆圧検知: OFF（クリックで ON）'"
-				@click="pressureSensitivity = !pressureSensitivity"
-			>
-				<i :class="['ti', pressureSensitivity ? 'ti-writing' : 'ti-writing-off']"></i>
-			</button>
-
-
-			<div :class="$style.spacer"></div>
-
-			<button class="_button" :class="$style.toolButton" title="全消し" @click="clearAll"><i class="ti ti-trash"></i></button>
-		</div>
-
-		<!-- Row 2: color + brush params + layer opacity + view controls -->
-		<div :class="[$style.toolbar, $style.toolbarSecondary]">
+			<!-- 色 (Color) — leftmost so the swatch is the first thing the eye finds. -->
 			<div :class="$style.toolGroup">
 				<button
 					ref="colorSwatchEl"
@@ -111,44 +49,177 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 			<div :class="$style.separator"></div>
 
-			<label :class="$style.sliderField" :title="tool === 'eraser' ? '消しゴムの太さ' : tool === 'text' ? '文字サイズ' : '太さ'">
-				<i :class="[$style.sliderIcon, tool === 'eraser' ? 'ti ti-eraser' : tool === 'text' ? 'ti ti-typography' : 'ti ti-line-height']"></i>
-				<input v-model.number="activeBrushWidth" type="range" min="1" max="60" step="1" :class="$style.widthSlider"/>
-				<span :class="$style.widthValue">{{ activeBrushWidth }}</span>
-			</label>
+			<!-- Drawing tools, sub-grouped:
+			       1. ピグメントを置くブラシ — hard edge → soft edge progression
+			       2. 既存ピクセルを変化させるブラシ — only on main layer
+			       3. 補助ツール — line / fill / eraser / text / spoit
+			     Raster-only buttons stay in the DOM with `invisible` when the active
+			     layer isn't main, so subgroup 3's position never shifts. -->
+			<div :class="$style.toolGroup">
+				<button class="_button" :class="[$style.toolButton, tool === 'pen' ? $style.toolActive : null]" title="ペン" @click="tool = 'pen'"><i class="ti ti-pencil"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'marker' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="マーカー (塗りレイヤー専用 / 乗算ブレンド)" @click="tool = 'marker'"><i class="ti ti-highlight"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'watercolor' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="水彩 (塗りレイヤー専用 / 重ね塗りで濃くなる)" @click="tool = 'watercolor'"><i class="ti ti-droplet"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'airbrush' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="エアブラシ (塗りレイヤー専用)" @click="tool = 'airbrush'"><i class="ti ti-spray"></i></button>
 
-			<label :class="$style.sliderField" title="不透明度" :style="tool === 'eraser' ? 'opacity: 0.4;' : ''">
-				<i class="ti ti-droplet" :class="$style.sliderIcon"></i>
-				<input v-model.number="opacity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider" :disabled="tool === 'eraser'"/>
-				<span :class="$style.widthValue">{{ Math.round(opacity * 100) }}</span>
-			</label>
+				<span :class="[$style.subseparator, !rasterToolsVisible ? $style.invisible : null]"></span>
+				<button class="_button" :class="[$style.toolButton, tool === 'mixer' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="指先 (塗りレイヤー専用 / 既存ピクセルをぼかす)" @click="tool = 'mixer'"><i class="ti ti-hand-finger"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'dodge' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="覆い焼き (塗りレイヤー専用 / 加算ブレンドで明るくする)" @click="tool = 'dodge'"><i class="ti ti-flare"></i></button>
 
-			<label :class="$style.sliderField" title="手ぶれ補正">
-				<i class="ti ti-wave-saw-tool" :class="$style.sliderIcon"></i>
-				<input v-model.number="smoothing" type="range" min="0" max="20" step="1" :class="$style.widthSlider"/>
-				<span :class="$style.widthValue">{{ smoothing }}</span>
-			</label>
+				<span :class="$style.subseparator"></span>
 
-			<label :class="$style.sliderField" title="下描き透明度">
-				<span :class="$style.toolLabel">下描き透明度</span>
-				<input v-model.number="draftOpacity" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
-				<span :class="$style.widthValue">{{ Math.round(draftOpacity * 100) }}</span>
-			</label>
+				<button class="_button" :class="[$style.toolButton, tool === 'line' ? $style.toolActive : null]" title="直線" @click="tool = 'line'"><i class="ti ti-line"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'fill' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="塗りつぶし (塗りレイヤー専用)" @click="tool = 'fill'"><i class="ti ti-paint"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'eraser' ? $style.toolActive : null]" title="消しゴム" @click="tool = 'eraser'"><i class="ti ti-eraser"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'text' ? $style.toolActive : null]" title="テキスト" @click="tool = 'text'"><i class="ti ti-typography"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'spoit' ? $style.toolActive : null]" title="スポイト (Alt+クリック)" @click="tool = 'spoit'"><i class="ti ti-color-picker"></i></button>
+			</div>
 
-			<label v-if="tool === 'airbrush'" :class="$style.sliderField" title="エアブラシの硬さ (低=ふわふわ広い / 高=シャープ寄り)">
-				<span :class="$style.toolLabel">硬さ</span>
-				<input v-model.number="airbrushHardness" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
-				<span :class="$style.widthValue">{{ Math.round(airbrushHardness * 100) }}</span>
-			</label>
-			<button v-if="tool === 'airbrush'" class="_button" :class="[$style.toolButton, airbrushShowCore ? $style.toolActive : null]" title="コア線（エアブラシの芯を表示）" @click="airbrushShowCore = !airbrushShowCore"><i class="ti ti-line"></i></button>
+			<div :class="$style.separator"></div>
+
+			<!-- 履歴 (Edit history) -->
+			<div :class="$style.toolGroup">
+				<button class="_button" :class="$style.toolButton" :disabled="!canUndo" title="元に戻す (Ctrl+Z)" @click="undo"><i class="ti ti-arrow-back-up"></i></button>
+				<button class="_button" :class="$style.toolButton" :disabled="!canRedo" title="やり直し (Ctrl+Y)" @click="redo"><i class="ti ti-arrow-forward-up"></i></button>
+			</div>
+
+			<!-- Spacer pushes the layer cluster to the right edge so the layer toggle's
+			     position stays stable when the left-side tool group expands/contracts
+			     (raster tools showing/hiding shouldn't shift this button around). -->
+			<div :class="$style.spacer"></div>
+
+			<!-- レイヤー (Layer): which layer to draw on / clip routing / draft visibility -->
+			<div :class="$style.toolGroup">
+				<button
+					class="_button"
+					:class="[$style.layerToggle, currentLayer !== 'main' ? $style.toolActive : null]"
+					:title="layerToggleDisabled ? `編集中レイヤー: ${currentLayerLabel}（クリックで切替・ツールは自動でペンに）` : `編集中レイヤー: ${currentLayerLabel}（クリックで切替）`"
+					@click="toggleLayer"
+				>
+					<i class="ti ti-layers-subtract"></i>
+					<span :class="$style.layerToggleLabel">{{ currentLayerLabel }}</span>
+				</button>
+				<button
+					class="_button"
+					:class="[$style.toolButton, clipMode === 'lineart' ? $style.toolActive : null]"
+					title="線画クリップ: ペン/直線を線画レイヤーの既存ピクセルのみに重ねる"
+					@click="clipMode = clipMode === 'lineart' ? 'none' : 'lineart'"
+				>
+					<i class="ti ti-link"></i>
+				</button>
+				<button
+					class="_button"
+					:class="[$style.toolButton, clipMode === 'main' ? $style.toolActive : null]"
+					title="塗りクリップ: ペン/直線をメインレイヤーの既存ピクセルのみに重ねる"
+					@click="clipMode = clipMode === 'main' ? 'none' : 'main'"
+				>
+					<i class="ti ti-paint-filled"></i>
+				</button>
+				<label :class="$style.sliderField" title="下描きレイヤーの表示透明度">
+					<span :class="$style.toolLabel">下描き</span>
+					<input v-model.number="draftOpacity" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
+					<span :class="$style.widthValue">{{ Math.round(draftOpacity * 100) }}</span>
+				</label>
+			</div>
+
+			<!-- Destructive zone — pulled hard to the top-right corner with a wide
+			     gap before it so the trash button is the most isolated control on
+			     the toolbar. The destructive tint reinforces "this wipes everything". -->
+			<div :class="$style.dangerSpacer"></div>
+			<button class="_button" :class="[$style.toolButton, $style.dangerButton]" title="全消し（取り消せません）" @click="clearAll"><i class="ti ti-trash"></i></button>
+		</div>
+
+		<!-- Row 2: 共通ブラシ params / ツール固有 / 表示 -->
+		<div :class="[$style.toolbar, $style.toolbarSecondary]">
+			<!-- 共通ブラシ (Common brush params) — apply across all stroke tools -->
+			<div :class="$style.toolGroup">
+				<label :class="$style.sliderField" :title="tool === 'eraser' ? '消しゴムの太さ' : tool === 'text' ? '文字サイズ' : '太さ'">
+					<span :class="$style.toolLabel">{{ tool === 'text' ? 'サイズ' : '太さ' }}</span>
+					<input v-model.number="activeBrushWidth" type="range" min="1" max="60" step="1" :class="$style.widthSlider"/>
+					<span :class="$style.widthValue">{{ activeBrushWidth }}</span>
+				</label>
+
+				<label :class="$style.sliderField" title="不透明度" :style="tool === 'eraser' ? 'opacity: 0.4;' : ''">
+					<span :class="$style.toolLabel">不透明度</span>
+					<input v-model.number="opacity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider" :disabled="tool === 'eraser'"/>
+					<span :class="$style.widthValue">{{ Math.round(opacity * 100) }}</span>
+				</label>
+
+				<label :class="$style.sliderField" title="手ぶれ補正">
+					<span :class="$style.toolLabel">手ぶれ補正</span>
+					<input v-model.number="smoothing" type="range" min="0" max="20" step="1" :class="$style.widthSlider"/>
+					<span :class="$style.widthValue">{{ smoothing }}</span>
+				</label>
+
+				<button
+					class="_button"
+					:class="[$style.toolButton, pressureSensitivity ? $style.toolActive : null]"
+					:title="pressureSensitivity ? '筆圧検知: ON（クリックで OFF）' : '筆圧検知: OFF（クリックで ON）'"
+					@click="pressureSensitivity = !pressureSensitivity"
+				>
+					<i :class="['ti', pressureSensitivity ? 'ti-writing' : 'ti-writing-off']"></i>
+				</button>
+			</div>
+
+			<!-- ツール固有 (Tool-specific params) — only the selected tool's controls,
+			     wrapped in a tinted zone so users can tell at a glance these change
+			     when the active tool changes. -->
+			<div v-if="hasToolParams" :class="$style.toolParams">
+				<template v-if="tool === 'airbrush'">
+					<label :class="$style.sliderField" title="エアブラシの硬さ (低=ふわふわ広い / 高=シャープ寄り)">
+						<span :class="$style.toolLabel">硬さ</span>
+						<input v-model.number="airbrushHardness" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
+						<span :class="$style.widthValue">{{ Math.round(airbrushHardness * 100) }}</span>
+					</label>
+					<button class="_button" :class="[$style.toolButton, airbrushShowCore ? $style.toolActive : null]" title="コア線（エアブラシの芯を表示）" @click="airbrushShowCore = !airbrushShowCore"><i class="ti ti-line"></i></button>
+				</template>
+
+				<template v-else-if="tool === 'watercolor'">
+					<label :class="$style.sliderField" title="水彩のにじみ (低=シャープ / 高=ふんわり)">
+						<span :class="$style.toolLabel">にじみ</span>
+						<input v-model.number="watercolorBleed" type="range" min="0" max="2" step="0.05" :class="$style.widthSlider"/>
+						<span :class="$style.widthValue">{{ Math.round(watercolorBleed * 100) }}</span>
+					</label>
+					<label :class="$style.sliderField" title="水彩の濃度 (低=薄塗り重ね / 高=一塗りで濃い)">
+						<span :class="$style.toolLabel">濃度</span>
+						<input v-model.number="watercolorDensity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider"/>
+						<span :class="$style.widthValue">{{ Math.round(watercolorDensity * 100) }}</span>
+					</label>
+				</template>
+
+				<template v-else-if="tool === 'marker'">
+					<label :class="$style.sliderField" title="マーカーの濃さ (乗算ブレンド時の不透明度)">
+						<span :class="$style.toolLabel">濃さ</span>
+						<input v-model.number="markerIntensity" type="range" min="0.1" max="1" step="0.05" :class="$style.widthSlider"/>
+						<span :class="$style.widthValue">{{ Math.round(markerIntensity * 100) }}</span>
+					</label>
+				</template>
+
+				<template v-else-if="tool === 'mixer'">
+					<label :class="$style.sliderField" title="指先の強さ (低=じわっと / 高=一気にぼかす)">
+						<span :class="$style.toolLabel">強さ</span>
+						<input v-model.number="mixerStrength" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider"/>
+						<span :class="$style.widthValue">{{ Math.round(mixerStrength * 100) }}</span>
+					</label>
+				</template>
+
+				<template v-else-if="tool === 'dodge'">
+					<label :class="$style.sliderField" title="覆い焼きの強さ (低=ほんのり / 高=一気に明るく)">
+						<span :class="$style.toolLabel">強さ</span>
+						<input v-model.number="dodgeIntensity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider"/>
+						<span :class="$style.widthValue">{{ Math.round(dodgeIntensity * 100) }}</span>
+					</label>
+				</template>
+			</div>
 
 			<div :class="$style.spacer"></div>
 
+			<!-- 表示 (View) — rotate-reset / hand / zoom-reset / flip. Zoom in/out
+			     buttons removed (Ctrl+wheel and the hand tool cover that). Rotate
+			     reset sits left of the hand tool so it's reachable while panning. -->
 			<div :class="$style.toolGroup">
-				<button class="_button" :class="$style.toolButton" :disabled="zoom <= MIN_ZOOM" title="縮小 (Ctrl+ホイール)" @click="zoomOut"><i class="ti ti-zoom-out"></i></button>
-				<button class="_button" :class="[$style.toolButton, $style.zoomLabel]" title="表示をリセット (100% / 中央 / 回転0°)" @click="zoomReset">{{ Math.round(zoom * 100) }}%</button>
-				<button class="_button" :class="$style.toolButton" :disabled="zoom >= MAX_ZOOM" title="拡大 (Ctrl+ホイール)" @click="zoomIn"><i class="ti ti-zoom-in"></i></button>
 				<button class="_button" :class="$style.toolButton" :disabled="rotation === 0" title="回転リセット" @click="rotation = 0"><i class="ti ti-rotate-clockwise"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'hand' ? $style.toolActive : null]" title="手のひら (ドラッグ移動 / Shift+ドラッグ回転 / ホイールでズーム)" @click="tool = 'hand'"><i class="ti ti-hand-stop"></i></button>
+				<button class="_button" :class="[$style.toolButton, $style.zoomLabel]" title="表示をリセット (100% / 中央 / 回転0°)" @click="zoomReset">{{ Math.round(zoom * 100) }}%</button>
 				<button class="_button" :class="[$style.toolButton, mirrorView ? $style.toolActive : null]" title="左右反転ビュー（表示のみ）" @click="mirrorView = !mirrorView"><i class="ti ti-flip-horizontal"></i></button>
 			</div>
 		</div>
@@ -238,7 +309,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 		</div>
 
 		<div :class="$style.footer">
-			<button class="_button" :class="$style.cancelButton" @click="close">
+			<button class="_button" :class="$style.cancelButton" @click="closeWindow">
 				{{ i18n.ts.cancel }}
 			</button>
 			<MkButton primary gradate :disabled="saving" @click="saveAndClose">
@@ -253,6 +324,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 <script lang="ts" setup>
 import { onMounted, onBeforeUnmount, ref, computed, useTemplateRef, watch, nextTick } from 'vue';
 import * as Misskey from 'misskey-js';
+import type { ChatDrawingStroke, ChatDrawingTilePatch } from '@/utility/chat-drawing-api.js';
 import MkWindow from '@/components/MkWindow.vue';
 import MkButton from '@/components/MkButton.vue';
 import { i18n } from '@/i18n.js';
@@ -261,8 +333,7 @@ import { ensureSignin } from '@/i.js';
 import {
 	apiChatDrawingUpdate,
 	apiChatDrawingShow,
-	type ChatDrawing,
-	type ChatDrawingStroke,
+	
 } from '@/utility/chat-drawing-api.js';
 
 type ChatConnection =
@@ -297,13 +368,30 @@ const cursorStyle = ref<{ left: string; top: string; width: string; height: stri
 
 // UI tools include client-only 'line' (commits as a 2-point pen stroke on pointer up)
 // and 'spoit' (eyedropper — never commits a stroke, just sets color from the pixel picked).
-const tool = ref<'pen' | 'eraser' | 'fill' | 'line' | 'spoit' | 'text' | 'hand' | 'airbrush'>('pen');
+// Tool union, including raster-only brushes that always paint to the main raster
+// layer (watercolor / marker / mixer / dodge). These are rendered live to mainCanvas
+// and broadcast as raster tile patches; their strokes never enter `strokes[]`.
+const tool = ref<'pen' | 'eraser' | 'fill' | 'line' | 'spoit' | 'text' | 'hand' | 'airbrush' | 'watercolor' | 'marker' | 'mixer' | 'dodge'>('pen');
 
 // Airbrush adjustables. Hardness 0..1 maps to shadow blur ratio (low = wide & soft, high
 // = tight & sharp). Core toggles whether the source line is visible — off (default) renders
 // only the blurred halo via the off-canvas shadow trick.
 const airbrushHardness = ref<number>(0.3);
 const airbrushShowCore = ref<boolean>(false);
+
+// Per-tool adjustables for the other raster brushes. Each is exposed as a 0..1
+// slider in the toolbar when the matching tool is selected, and read directly by
+// the tool's render path.
+//   watercolorBleed: shadowBlur ratio for the soft edge (lower = sharper)
+//   watercolorDensity: per-stroke alpha multiplier (lower = more passes to build up)
+//   markerIntensity: per-stroke alpha multiplier; multiply blend keeps overlaps darkening
+//   mixerStrength: blur convergence per dab (lower = subtler smudge)
+//   dodgeIntensity: per-stroke alpha multiplier on the additive (lighter) composite
+const watercolorBleed = ref<number>(0.7);
+const watercolorDensity = ref<number>(0.6);
+const markerIntensity = ref<number>(1.0);
+const mixerStrength = ref<number>(0.55);
+const dodgeIntensity = ref<number>(0.5);
 
 // View rotation in degrees, applied to canvasWrap (canvas + textarea overlay rotate as a
 // unit). Drawing-tool inverse-mapping uses this in canvasPointToNormalized so strokes still
@@ -339,10 +427,10 @@ function refocusTextBox() {
 		return;
 	}
 	void nextTick(() => textBoxEl.value?.focus());
-	setTimeout(() => {
+	globalThis.setTimeout(() => {
 		if (tool.value !== 'text') return;
-		const active = document.activeElement;
-		if (active && active !== document.body && active !== el && active instanceof HTMLElement && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+		const active = globalThis.document.activeElement;
+		if (active && active !== globalThis.document.body && active !== el && active instanceof HTMLElement && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
 			return;
 		}
 		textBoxEl.value?.focus();
@@ -372,14 +460,14 @@ function insertNewlineAtCaret() {
 		textBoxValue.value += '\n';
 		return;
 	}
-	const start = el.selectionStart ?? textBoxValue.value.length;
-	const end = el.selectionEnd ?? textBoxValue.value.length;
+	const start = el.selectionStart;
+	const end = el.selectionEnd;
 	textBoxValue.value = textBoxValue.value.slice(0, start) + '\n' + textBoxValue.value.slice(end);
 	void nextTick(() => {
-		const e = textBoxEl.value;
-		if (!e) return;
+		const target = textBoxEl.value;
+		if (!target) return;
 		const pos = start + 1;
-		e.selectionStart = e.selectionEnd = pos;
+		target.selectionStart = target.selectionEnd = pos;
 	});
 }
 
@@ -413,6 +501,12 @@ watch(tool, (newT: string, oldT: string) => {
 		textLocked.value = false;
 		textCursor.value = null;
 	}
+	// Main-only tools (fill / airbrush) always paint to main; surface that in the UI by
+	// flipping the active layer over so the layer label and any layer-aware controls
+	// (eraser preview, clip mode visibility) match where the next stroke will land.
+	if (MAIN_ONLY_TOOLS.has(newT)) {
+		currentLayer.value = 'main';
+	}
 });
 const currentLayer = ref<'main' | 'draft' | 'lineart'>('draft');
 const draftOpacity = ref(0.4);
@@ -426,35 +520,42 @@ const opacity = ref<number>(1);
 const smoothing = ref<number>(0);
 const mirrorView = ref<boolean>(false);
 
-
 // Layer-separated offscreen canvases. Strokes are drawn to the corresponding offscreen
 // canvas (each starts fully transparent) and then composited onto the visible canvas.
 // This keeps the main layer's eraser/pen from affecting draft pixels — the main canvas
 // becomes transparent where erased, letting draft show through in the composite.
-const mainCanvas = document.createElement('canvas');
-const draftCanvas = document.createElement('canvas');
-const lineartCanvas = document.createElement('canvas');
+function get2dCtx(canvas: HTMLCanvasElement, opts?: CanvasRenderingContext2DSettings): CanvasRenderingContext2D {
+	const c = canvas.getContext('2d', opts);
+	if (!c) throw new Error('Failed to acquire 2D context');
+	return c;
+}
+
+const mainCanvas = globalThis.document.createElement('canvas');
+const draftCanvas = globalThis.document.createElement('canvas');
+const lineartCanvas = globalThis.document.createElement('canvas');
 mainCanvas.width = draftCanvas.width = lineartCanvas.width = 0; // sized on first use
-let mainCtx: CanvasRenderingContext2D | null = null;
-let draftCtx: CanvasRenderingContext2D | null = null;
-let lineartCtx: CanvasRenderingContext2D | null = null;
+let mainCtx: CanvasRenderingContext2D = get2dCtx(mainCanvas, { willReadFrequently: true });
+let draftCtx: CanvasRenderingContext2D = get2dCtx(draftCanvas, { willReadFrequently: true });
+let lineartCtx: CanvasRenderingContext2D = get2dCtx(lineartCanvas, { willReadFrequently: true });
 
 // Baseline (flattened) canvases hold the cumulative state for strokes[0..bakedCount-1].
 // They let redrawAll skip re-replaying old strokes — instead we blit the baseline and
 // only replay the recent window. Strokes that get baked lose their individual undo
 // patch (no longer reachable from the undo stack).
-const baselineMainCanvas = document.createElement('canvas');
-const baselineDraftCanvas = document.createElement('canvas');
-const baselineLineartCanvas = document.createElement('canvas');
+const baselineMainCanvas = globalThis.document.createElement('canvas');
+const baselineDraftCanvas = globalThis.document.createElement('canvas');
+const baselineLineartCanvas = globalThis.document.createElement('canvas');
 baselineMainCanvas.width = baselineDraftCanvas.width = baselineLineartCanvas.width = 0;
-let baselineMainCtx: CanvasRenderingContext2D | null = null;
-let baselineDraftCtx: CanvasRenderingContext2D | null = null;
-let baselineLineartCtx: CanvasRenderingContext2D | null = null;
+let baselineMainCtx: CanvasRenderingContext2D = get2dCtx(baselineMainCanvas, { willReadFrequently: true });
+let baselineDraftCtx: CanvasRenderingContext2D = get2dCtx(baselineDraftCanvas, { willReadFrequently: true });
+let baselineLineartCtx: CanvasRenderingContext2D = get2dCtx(baselineLineartCanvas, { willReadFrequently: true });
 let bakedCount = 0;
 // Keep the undo window tight so only the last N of my own strokes need their
 // per-stroke patch; everything older merges into the baseline.
 const UNDO_WINDOW = 10;
-const color = ref<string>('#222222');
+// Default colour: 濃い水色 (~#2a8dab). HSV ≈ (0.539, 0.754, 0.671) — kept in sync
+// with the hsvH/S/V refs below so the wheel picker opens at the matching position.
+const color = ref<string>('#2a8dab');
 const width = ref<number>(6);
 // Eraser has its own width so switching between pen and eraser doesn't require resizing.
 const eraserWidth = ref<number>(20);
@@ -478,22 +579,31 @@ const activeBrushWidth = computed<number>({
 	},
 });
 
-// Which layer the next stroke lands on, honouring the lineart-clip override. Only pen/
-// paint/line make sense to clip; other tools ignore the flag.
 // Tools whose strokes can be clipped to an existing layer's content. fill/eraser/spoit/text
 // don't make sense for clip routing; line commits as a 2-point pen stroke so it follows
-// pen rules.
-const CLIP_ELIGIBLE_TOOLS = new Set(['pen', 'airbrush', 'line']);
+// pen rules. Airbrush is intentionally excluded — it's a main-only tool.
+const CLIP_ELIGIBLE_TOOLS = new Set(['pen', 'line']);
+
+// Tools that always land on the main (fill / raster) layer regardless of the active
+// layer or clip-mode toggles. The user wanted "fill" and "airbrush" to behave as
+// dedicated paint-layer tools — switching the active layer to draft or lineart and
+// then picking fill should still paint to main, not the underlay.
+// All raster-only brushes belong here. They paint directly to the main raster
+// canvas, broadcast as tile-patch PNGs, and never enter `strokes[]`.
+const MAIN_ONLY_TOOLS = new Set(['fill', 'airbrush', 'watercolor', 'marker', 'mixer', 'dodge']);
 
 function effectiveLayerForNewStroke(): 'main' | 'draft' | 'lineart' {
+	if (MAIN_ONLY_TOOLS.has(tool.value)) return 'main';
 	if (clipMode.value === 'lineart' && CLIP_ELIGIBLE_TOOLS.has(tool.value)) return 'lineart';
 	if (clipMode.value === 'main' && CLIP_ELIGIBLE_TOOLS.has(tool.value)) return 'main';
 	return currentLayer.value;
 }
 
 function effectiveClipForNewStroke(): boolean {
+	if (MAIN_ONLY_TOOLS.has(tool.value)) return false;
 	return clipMode.value !== 'none' && CLIP_ELIGIBLE_TOOLS.has(tool.value);
 }
+
 const saving = ref(false);
 const loading = ref(true);
 const title = ref<string>('');
@@ -509,6 +619,7 @@ const composedColor = computed(() => {
 
 // Recent colors (base hex, no alpha). Most-recently-used first, max 10.
 const recentColors = ref<string[]>([]);
+
 function recordRecentColor(hex: string) {
 	const normalized = hex.toLowerCase();
 	const idx = recentColors.value.indexOf(normalized);
@@ -516,6 +627,7 @@ function recordRecentColor(hex: string) {
 	recentColors.value.unshift(normalized);
 	if (recentColors.value.length > 10) recentColors.value.length = 10;
 }
+
 function applyRecentColor(hex: string) {
 	color.value = hex;
 	const [h, s, v] = rgbToHsv(...hexToRgb(hex));
@@ -526,17 +638,19 @@ function applyRecentColor(hex: string) {
 }
 
 // HSV color wheel state. H in [0, 1) (angle), S in [0, 1] (radius), V in [0, 1] (slider).
-const hsvH = ref<number>(0);
-const hsvS = ref<number>(0);
-const hsvV = ref<number>(0.13);
-const hexInput = ref<string>('#222222ff');
+// Initial values match the default `color` (濃い水色) so the wheel and swatch agree
+// from the first render — anything else would briefly show a mismatched picker.
+const hsvH = ref<number>(0.539);
+const hsvS = ref<number>(0.754);
+const hsvV = ref<number>(0.671);
+const hexInput = ref<string>('#2a8dabff');
 const colorPopoverOpen = ref<boolean>(false);
 const colorSwatchEl = useTemplateRef('colorSwatchEl');
 const wheelCanvasEl = useTemplateRef('wheelCanvasEl');
 const WHEEL_SIZE = 200;
 // Geometry for the hue-ring + SV-square picker.
-const WHEEL_RING_OUTER = WHEEL_SIZE / 2 - 2;   // outermost radius of the hue ring
-const WHEEL_RING_INNER = WHEEL_SIZE / 2 - 26;  // inner radius of the hue ring (ring thickness = 24px)
+const WHEEL_RING_OUTER = WHEEL_SIZE / 2 - 2; // outermost radius of the hue ring
+const WHEEL_RING_INNER = WHEEL_SIZE / 2 - 26; // inner radius of the hue ring (ring thickness = 24px)
 // Inscribed square inside the inner circle. side = inner_radius * √2, but shrink a hair
 // so the square doesn't visually touch the ring.
 const WHEEL_SQUARE_SIDE = Math.floor((WHEEL_RING_INNER - 4) * Math.SQRT2);
@@ -547,10 +661,12 @@ function hexToRgb(hex: string): [number, number, number] {
 	if (s.length === 3) return [parseInt(s[0] + s[0], 16), parseInt(s[1] + s[1], 16), parseInt(s[2] + s[2], 16)];
 	return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
 }
+
 function rgbToHex(r: number, g: number, b: number): string {
 	const to = (n: number) => Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, '0');
 	return `#${to(r)}${to(g)}${to(b)}`;
 }
+
 function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
 	const rn = r / 255, gn = g / 255, bn = b / 255;
 	const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
@@ -566,6 +682,7 @@ function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
 	const s = max === 0 ? 0 : d / max;
 	return [h, s, max];
 }
+
 function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
 	const i = Math.floor(h * 6);
 	const f = h * 6 - i;
@@ -761,10 +878,12 @@ function onWheelPointerDown(ev: PointerEvent) {
 	wheelCanvasEl.value?.setPointerCapture(ev.pointerId);
 	applyWheelPick(ev, mode);
 }
+
 function onWheelPointerMove(ev: PointerEvent) {
 	if (!wheelDragMode) return;
 	applyWheelPick(ev, wheelDragMode);
 }
+
 function onWheelPointerUp(ev: PointerEvent) {
 	if (!wheelDragMode) return;
 	wheelDragMode = null;
@@ -838,10 +957,9 @@ function computeStrokeBbox(stroke: ChatDrawingStroke): { x: number; y: number; w
 		return { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H };
 	}
 	if (stroke.tool === 'text') {
-		// Text bbox = anchor + measured text size at the stored font px. Falls back to full
-		// canvas if measurement context isn't available yet (rare — only before first layer init).
-		const measureCtx = mainCtx ?? draftCtx ?? lineartCtx;
-		if (!stroke.text || !measureCtx) return { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H };
+		// Text bbox = anchor + measured text size at the stored font px.
+		const measureCtx = mainCtx;
+		if (!stroke.text) return { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H };
 		const fontPx = Math.max(4, stroke.width * CANVAS_W);
 		const lineHeight = fontPx * 1.4;
 		const lines = stroke.text.split('\n');
@@ -921,6 +1039,133 @@ function clearStrokePatches() {
 	preStrokeLayerTarget = null;
 }
 
+// Raster-history support for the main (fill) layer. The main layer no longer lives in
+// `strokes[]` — instead each completed stroke is baked into mainCanvas and the dirty
+// rect is broadcast as a `drawTilePatch` PNG. To keep undo/redo working we capture
+// before/after ImageData of the dirty rect for each main-layer stroke we authored, keyed
+// by the stroke id we'd otherwise have stored. Undo paints `before` back; redo paints
+// `after` and rebroadcasts the patch.
+type MainRasterPatch = {
+	x: number;
+	y: number;
+	before: ImageData;
+	after: ImageData;
+	composite: 'source-over' | 'destination-out' | 'source-atop';
+};
+const mainRasterPatchHistory = new Map<string, MainRasterPatch>();
+
+function clearMainRasterPatches() {
+	mainRasterPatchHistory.clear();
+}
+
+// Encode an ImageData rect to a PNG base64 string by drawing through a throwaway canvas.
+async function imageDataToBase64Png(img: ImageData): Promise<string | null> {
+	const tmp = globalThis.document.createElement('canvas');
+	tmp.width = img.width;
+	tmp.height = img.height;
+	const tctx = tmp.getContext('2d');
+	if (!tctx) return null;
+	tctx.putImageData(img, 0, 0);
+	return await new Promise<string | null>(resolve => {
+		tmp.toBlob(async b => {
+			if (!b) { resolve(null); return; }
+			const buf = await b.arrayBuffer();
+			const bytes = new Uint8Array(buf);
+			let binary = '';
+			const CHUNK = 0x8000;
+			for (let i = 0; i < bytes.length; i += CHUNK) {
+				binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+			}
+			resolve(btoa(binary));
+		}, 'image/png');
+	});
+}
+
+// Decode a base64 PNG into an HTMLImageElement that's ready to drawImage().
+function base64PngToImage(b64: string): Promise<HTMLImageElement> {
+	return new Promise((resolve, reject) => {
+		const img = new Image();
+		img.onload = () => resolve(img);
+		img.onerror = err => reject(err);
+		img.src = `data:image/png;base64,${b64}`;
+	});
+}
+
+// Bake a just-finished main-layer stroke: snapshot the dirty rect, broadcast it as a
+// raster patch, and record before/after into the undo history. Replaces the path that
+// would have appended a vector stroke + sent `drawStroke` for the main layer.
+//
+// `preStrokeLayerSnapshot` must still be the pre-stroke snapshot of the main layer at
+// call time (taken at pointerDown via grabPreStrokeSnapshot).
+async function commitMainRasterStroke(strokeId: string, bbox: { x: number; y: number; w: number; h: number }, composite: 'source-over' | 'destination-out' | 'source-atop' = 'source-over') {
+	if (!preStrokeLayerSnapshot || preStrokeLayerTarget !== 'main') return;
+	const before = extractImageDataRegion(preStrokeLayerSnapshot, bbox.x, bbox.y, bbox.w, bbox.h);
+	const mainCtxLocal = getLayerCtx('main');
+	const after = mainCtxLocal.getImageData(bbox.x, bbox.y, bbox.w, bbox.h);
+	mainRasterPatchHistory.set(strokeId, {
+		x: bbox.x,
+		y: bbox.y,
+		before,
+		after,
+		composite,
+	});
+	myUndoStack.value.push(strokeId);
+	myRedoStack.value = [];
+	// Evict oldest history past the cap, mirroring the vector path's behaviour. Past
+	// the cap, undo will fall back to "no-op" for that stroke since we don't store the
+	// before-state any more.
+	while (myUndoStack.value.length > MAX_UNDO_HISTORY) {
+		const evicted = myUndoStack.value.shift();
+		if (evicted) {
+			strokePatches.delete(evicted);
+			mainRasterPatchHistory.delete(evicted);
+		}
+	}
+	preStrokeLayerSnapshot = null;
+	preStrokeLayerTarget = null;
+	const dataBase64 = await imageDataToBase64Png(after);
+	if (!dataBase64) return;
+	const patch: ChatDrawingTilePatch = {
+		id: strokeId,
+		x: bbox.x,
+		y: bbox.y,
+		width: bbox.w,
+		height: bbox.h,
+		dataBase64,
+		composite,
+	};
+	props.connection.send('drawTilePatch', { drawingId: props.drawingId, patch });
+}
+
+// Apply a remote (or replayed local) tile patch to the main canvas.
+//
+// Invariant: the patch carries the AUTHOR's post-stroke pixel state of the dirty rect,
+// padded enough to cover any soft-edge bleed. Receiver replaces the rect verbatim:
+// clearRect the destination, then draw the patch image at (x, y) source-over. This
+// reproduces the author's exact pixels regardless of whether the stroke was additive,
+// erasive, or composite-clipped, at the cost of clobbering any concurrent peer edits
+// inside the same rect (last-write-wins, which matches the existing collab semantics).
+//
+// `patch.composite` is preserved on the wire for forward-compat — future clients may
+// honour additive-only patches — but this implementation always uses replace semantics.
+async function applyTilePatch(patch: ChatDrawingTilePatch) {
+	let img: HTMLImageElement;
+	try {
+		img = await base64PngToImage(patch.dataBase64);
+	} catch {
+		return;
+	}
+	const c = getLayerCtx('main');
+	c.save();
+	c.setTransform(1, 0, 0, 1, 0, 0);
+	c.clearRect(patch.x, patch.y, patch.width, patch.height);
+	c.globalCompositeOperation = 'source-over';
+	c.globalAlpha = 1;
+	c.drawImage(img, patch.x, patch.y);
+	c.restore();
+	recompositeDisplay();
+}
+
 function newStrokeId(): string {
 	// 16 url-safe chars, matches the server-side /^[A-Za-z0-9_-]{1,32}$/ regex
 	const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
@@ -977,6 +1222,7 @@ const visibleRemoteCursors = computed(() => {
 const CURSOR_SEND_INTERVAL_MS = 33;
 let lastCursorSentAt = 0;
 let lastCursorSentPos: { x: number; y: number } | null = null;
+
 function sendCursor(x: number, y: number) {
 	const t = performance.now();
 	if (t - lastCursorSentAt < CURSOR_SEND_INTERVAL_MS) return;
@@ -1015,7 +1261,9 @@ function pressureFromEvent(ev: PointerEvent): number {
 
 function getContext(): CanvasRenderingContext2D {
 	if (!ctx) {
-		ctx = canvasEl.value!.getContext('2d', { willReadFrequently: false })!;
+		const el = canvasEl.value;
+		if (!el) throw new Error('canvasEl not yet mounted');
+		ctx = get2dCtx(el, { willReadFrequently: false });
 	}
 	return ctx;
 }
@@ -1024,17 +1272,14 @@ function ensureLayerCanvases() {
 	if (mainCanvas.width !== CANVAS_W || mainCanvas.height !== CANVAS_H) {
 		mainCanvas.width = CANVAS_W;
 		mainCanvas.height = CANVAS_H;
-		mainCtx = mainCanvas.getContext('2d', { willReadFrequently: true });
 	}
 	if (draftCanvas.width !== CANVAS_W || draftCanvas.height !== CANVAS_H) {
 		draftCanvas.width = CANVAS_W;
 		draftCanvas.height = CANVAS_H;
-		draftCtx = draftCanvas.getContext('2d', { willReadFrequently: true });
 	}
 	if (lineartCanvas.width !== CANVAS_W || lineartCanvas.height !== CANVAS_H) {
 		lineartCanvas.width = CANVAS_W;
 		lineartCanvas.height = CANVAS_H;
-		lineartCtx = lineartCanvas.getContext('2d', { willReadFrequently: true });
 	}
 }
 
@@ -1042,34 +1287,31 @@ function ensureBaselineCanvases() {
 	if (baselineMainCanvas.width !== CANVAS_W || baselineMainCanvas.height !== CANVAS_H) {
 		baselineMainCanvas.width = CANVAS_W;
 		baselineMainCanvas.height = CANVAS_H;
-		baselineMainCtx = baselineMainCanvas.getContext('2d', { willReadFrequently: true });
 	}
 	if (baselineDraftCanvas.width !== CANVAS_W || baselineDraftCanvas.height !== CANVAS_H) {
 		baselineDraftCanvas.width = CANVAS_W;
 		baselineDraftCanvas.height = CANVAS_H;
-		baselineDraftCtx = baselineDraftCanvas.getContext('2d', { willReadFrequently: true });
 	}
 	if (baselineLineartCanvas.width !== CANVAS_W || baselineLineartCanvas.height !== CANVAS_H) {
 		baselineLineartCanvas.width = CANVAS_W;
 		baselineLineartCanvas.height = CANVAS_H;
-		baselineLineartCtx = baselineLineartCanvas.getContext('2d', { willReadFrequently: true });
 	}
 }
 
 function getBaselineLayerCtx(layer: 'main' | 'draft' | 'lineart'): CanvasRenderingContext2D {
 	ensureBaselineCanvases();
-	if (layer === 'draft') return baselineDraftCtx!;
-	if (layer === 'lineart') return baselineLineartCtx!;
-	return baselineMainCtx!;
+	if (layer === 'draft') return baselineDraftCtx;
+	if (layer === 'lineart') return baselineLineartCtx;
+	return baselineMainCtx;
 }
 
 function resetBaseline() {
 	ensureBaselineCanvases();
-	for (const ctx of [baselineMainCtx!, baselineDraftCtx!, baselineLineartCtx!]) {
-		ctx.save();
-		ctx.setTransform(1, 0, 0, 1, 0, 0);
-		ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-		ctx.restore();
+	for (const layerCtx of [baselineMainCtx, baselineDraftCtx, baselineLineartCtx]) {
+		layerCtx.save();
+		layerCtx.setTransform(1, 0, 0, 1, 0, 0);
+		layerCtx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+		layerCtx.restore();
 	}
 	bakedCount = 0;
 }
@@ -1081,9 +1323,9 @@ function snapshotBaselineFromLive() {
 	ensureBaselineCanvases();
 	ensureLayerCanvases();
 	for (const [dst, src] of [
-		[baselineMainCtx!, mainCanvas] as const,
-		[baselineDraftCtx!, draftCanvas] as const,
-		[baselineLineartCtx!, lineartCanvas] as const,
+		[baselineMainCtx, mainCanvas] as const,
+		[baselineDraftCtx, draftCanvas] as const,
+		[baselineLineartCtx, lineartCanvas] as const,
 	]) {
 		dst.save();
 		dst.setTransform(1, 0, 0, 1, 0, 0);
@@ -1101,11 +1343,14 @@ function bakeOneStroke() {
 	ensureBaselineCanvases();
 	const stroke = strokes.value[bakedCount];
 	const layer = resolveStrokeLayer(stroke);
-	renderStrokeToCtx(getBaselineLayerCtx(layer), stroke, {
-		main: baselineMainCanvas,
-		draft: baselineDraftCanvas,
-		lineart: baselineLineartCanvas,
-	});
+	// Skip baking main strokes when the raster supersedes them (legacy carry-overs).
+	if (!(mainRasterLoaded && layer === 'main')) {
+		renderStrokeToCtx(getBaselineLayerCtx(layer), stroke, {
+			main: baselineMainCanvas,
+			draft: baselineDraftCanvas,
+			lineart: baselineLineartCanvas,
+		});
+	}
 	if (stroke.id) {
 		const i = myUndoStack.value.indexOf(stroke.id);
 		if (i >= 0) myUndoStack.value.splice(i, 1);
@@ -1122,9 +1367,9 @@ function maybeBakeOverflow() {
 
 function getLayerCtx(layer: 'main' | 'draft' | 'lineart'): CanvasRenderingContext2D {
 	ensureLayerCanvases();
-	if (layer === 'draft') return draftCtx!;
-	if (layer === 'lineart') return lineartCtx!;
-	return mainCtx!;
+	if (layer === 'draft') return draftCtx;
+	if (layer === 'lineart') return lineartCtx;
+	return mainCtx;
 }
 
 function recompositeDisplay() {
@@ -1147,7 +1392,7 @@ function recompositeDisplay() {
 
 function clearCanvas() {
 	ensureLayerCanvases();
-	for (const lc of [mainCtx!, draftCtx!, lineartCtx!]) {
+	for (const lc of [mainCtx, draftCtx, lineartCtx]) {
 		lc.save();
 		lc.setTransform(1, 0, 0, 1, 0, 0);
 		lc.clearRect(0, 0, CANVAS_W, CANVAS_H);
@@ -1190,10 +1435,10 @@ const FILL_DILATE_ITERATIONS = 2;
 //   1: visited                              4: rim-processed
 //   2: dilation frontier                    (barrier still fresh-allocated per fill)
 const scratchPool: (Uint8Array | null)[] = [null, null, null, null, null];
+
 function getScratch(slot: number, n: number): Uint8Array {
 	let buf = scratchPool[slot];
-	if (!buf || buf.length < n) { buf = new Uint8Array(n); scratchPool[slot] = buf; }
-	else buf.fill(0);
+	if (!buf || buf.length < n) { buf = new Uint8Array(n); scratchPool[slot] = buf; } else buf.fill(0);
 	return buf;
 }
 
@@ -1278,8 +1523,9 @@ function buildClosedBarrier(data: Uint8ClampedArray, w: number, h: number, tR: n
 // fills on main (and vice versa).
 // Shared sample canvas reused across every fill — creating a fresh 1024×768 canvas per
 // fill was the biggest allocation cost during save/resume replay.
-const fillSampleCanvas = document.createElement('canvas');
-let fillSampleCtx: CanvasRenderingContext2D | null = null;
+const fillSampleCanvas = globalThis.document.createElement('canvas');
+const fillSampleCtx: CanvasRenderingContext2D = get2dCtx(fillSampleCanvas, { willReadFrequently: true });
+
 // Optional `sources` lets callers substitute alternate canvases per layer — used during
 // baking so fills read the baseline state rather than the full live state.
 function compositeLayerData(
@@ -1290,9 +1536,8 @@ function compositeLayerData(
 	if (fillSampleCanvas.width !== CANVAS_W || fillSampleCanvas.height !== CANVAS_H) {
 		fillSampleCanvas.width = CANVAS_W;
 		fillSampleCanvas.height = CANVAS_H;
-		fillSampleCtx = fillSampleCanvas.getContext('2d', { willReadFrequently: true });
 	}
-	const sctx = fillSampleCtx!;
+	const sctx = fillSampleCtx;
 	sctx.save();
 	sctx.setTransform(1, 0, 0, 1, 0, 0);
 	sctx.globalCompositeOperation = 'source-over';
@@ -1311,12 +1556,12 @@ function compositeLayerData(
 // target layer alone for backward compat.
 function floodFillOnContext(
 	c: CanvasRenderingContext2D,
-	sx: number, sy: number, hexColor: string,
+	rawSx: number, rawSy: number, hexColor: string,
 	sampleLayers?: ('main' | 'draft' | 'lineart')[],
 	sources?: { main?: HTMLCanvasElement; draft?: HTMLCanvasElement; lineart?: HTMLCanvasElement },
 ) {
-	sx = Math.max(0, Math.min(CANVAS_W - 1, Math.floor(sx)));
-	sy = Math.max(0, Math.min(CANVAS_H - 1, Math.floor(sy)));
+	const sx = Math.max(0, Math.min(CANVAS_W - 1, Math.floor(rawSx)));
+	const sy = Math.max(0, Math.min(CANVAS_H - 1, Math.floor(rawSy)));
 	const imageData = c.getImageData(0, 0, CANVAS_W, CANVAS_H);
 	const data = imageData.data;
 	const w = CANVAS_W;
@@ -1364,8 +1609,8 @@ function floodFillOnContext(
 
 	const stack: number[] = [sx, sy];
 	while (stack.length > 0) {
-		const y = stack.pop()!;
-		const x = stack.pop()!;
+		const y = stack.pop() as number;
+		const x = stack.pop() as number;
 		let xLeft = x;
 		let idx = y * w + xLeft;
 		while (xLeft >= 0 && passable(idx)) {
@@ -1383,14 +1628,12 @@ function floodFillOnContext(
 			if (y > 0) {
 				const idxUp = idx - w;
 				const matchUp = passable(idxUp);
-				if (!spanAbove && matchUp) { stack.push(xRight, y - 1); spanAbove = true; }
-				else if (spanAbove && !matchUp) spanAbove = false;
+				if (!spanAbove && matchUp) { stack.push(xRight, y - 1); spanAbove = true; } else if (spanAbove && !matchUp) spanAbove = false;
 			}
 			if (y < h - 1) {
 				const idxDown = idx + w;
 				const matchDown = passable(idxDown);
-				if (!spanBelow && matchDown) { stack.push(xRight, y + 1); spanBelow = true; }
-				else if (spanBelow && !matchDown) spanBelow = false;
+				if (!spanBelow && matchDown) { stack.push(xRight, y + 1); spanBelow = true; } else if (spanBelow && !matchDown) spanBelow = false;
 			}
 			xRight++;
 			idx++;
@@ -1517,43 +1760,34 @@ function parseColorRGBA(hex: string): [number, number, number, number] {
 	return [0, 0, 0, 255];
 }
 
-// Strip the trailing alpha byte (if any) from a hex colour, returning the opaque base
-// colour. Used by the paint-buffer flow which writes at full alpha to the buffer and
-// applies the stroke's transparency once at composite time.
-function hexWithoutAlpha(hex: string): string {
-	const s = hex.replace('#', '');
-	if (s.length === 8) return `#${s.slice(0, 6)}`;
-	return hex;
-}
-
 // Reusable offscreen buffer for the "paint" tool. Paint segments accumulate here at full
 // alpha, then composite onto the live layer with the stroke's alpha in one pass — that
 // avoids the alpha-overlap bead artefact where adjacent round-cap endpoints would otherwise
 // double their alpha and look like a string of dots when the user draws fast.
-const paintBuffer = document.createElement('canvas');
+const paintBuffer = globalThis.document.createElement('canvas');
 paintBuffer.width = paintBuffer.height = 0;
-let paintBufferCtx: CanvasRenderingContext2D | null = null;
+const paintBufferCtx: CanvasRenderingContext2D = get2dCtx(paintBuffer);
+
 function ensurePaintBuffer(): CanvasRenderingContext2D {
 	if (paintBuffer.width !== CANVAS_W || paintBuffer.height !== CANVAS_H) {
 		paintBuffer.width = CANVAS_W;
 		paintBuffer.height = CANVAS_H;
-		paintBufferCtx = paintBuffer.getContext('2d');
 	}
-	return paintBufferCtx!;
+	return paintBufferCtx;
 }
 
 // Snapshot of the active layer at the start of the current paint stroke, used for fast
 // drawImage-based restore on every pointermove (cheaper than putImageData of an ImageData).
-const paintBaselineCanvas = document.createElement('canvas');
+const paintBaselineCanvas = globalThis.document.createElement('canvas');
 paintBaselineCanvas.width = paintBaselineCanvas.height = 0;
-let paintBaselineCtx: CanvasRenderingContext2D | null = null;
+const paintBaselineCtx: CanvasRenderingContext2D = get2dCtx(paintBaselineCanvas);
+
 function ensurePaintBaseline(): CanvasRenderingContext2D {
 	if (paintBaselineCanvas.width !== CANVAS_W || paintBaselineCanvas.height !== CANVAS_H) {
 		paintBaselineCanvas.width = CANVAS_W;
 		paintBaselineCanvas.height = CANVAS_H;
-		paintBaselineCtx = paintBaselineCanvas.getContext('2d');
 	}
-	return paintBaselineCtx!;
+	return paintBaselineCtx;
 }
 
 let paintLiveLayer: 'main' | 'draft' | 'lineart' | null = null;
@@ -1580,6 +1814,11 @@ function startPaintLive(layer: 'main' | 'draft' | 'lineart') {
 // (pen / paint / watercolor / mixer) — overlapping segments at alpha 1 are idempotent
 // inside the buffer, so the bead artefact at endpoints is gone. Optional `shadow` enables
 // the watercolor-style soft-edge bleed.
+// Composite modes the buffer→layer step understands. 'source-over' is the default
+// pen/airbrush behaviour. 'multiply' darkens overlapping pixels (markers / felt-tip).
+// 'lighter' adds (dodge / glow). 'screen' brightens softly (alt for dodge).
+type LayerComposite = 'source-over' | 'multiply' | 'lighter' | 'screen';
+
 function paintLiveDrawSegment(
 	fromX: number, fromY: number,
 	toX: number, toY: number,
@@ -1588,6 +1827,7 @@ function paintLiveDrawSegment(
 	strokeAlpha: number,
 	clip: boolean,
 	shadow?: { color: string; blur: number; offsetX?: number; offsetY?: number },
+	layerComposite: LayerComposite = 'source-over',
 ) {
 	const bufCtx = ensurePaintBuffer();
 	bufCtx.save();
@@ -1614,19 +1854,155 @@ function paintLiveDrawSegment(
 	layerCtx.setTransform(1, 0, 0, 1, 0, 0);
 	layerCtx.globalCompositeOperation = 'copy';
 	layerCtx.drawImage(paintBaselineCanvas, 0, 0);
-	layerCtx.globalCompositeOperation = clip ? 'source-atop' : 'source-over';
+	layerCtx.globalCompositeOperation = clip ? 'source-atop' : layerComposite;
 	layerCtx.globalAlpha = strokeAlpha;
 	layerCtx.drawImage(paintBuffer, 0, 0);
 	layerCtx.globalAlpha = 1;
 	layerCtx.restore();
 }
 
-// (mixer brush helper removed along with the mixer/paint/watercolor UI tools — the legacy
-// renderStrokeToCtx branch still handles those types for stored-data backward compat.)
+// Per-brush parameters for the buffer-based live-draw flow. Each segment of the
+// active stroke routes through `paintLiveDrawSegment` with the right shadow / blend
+// for the selected tool. The buffer's contents accumulate at full alpha while the
+// final composite onto the layer applies tool-specific transparency or blend mode,
+// which avoids the alpha-doubling bead artefact at segment endpoints.
+function brushBufferStamp(
+	ax: number, ay: number, bx: number, by: number,
+	pressureAvg: number,
+	opaque: string,
+	alpha: number,
+	clip: boolean,
+) {
+	const baseW = Math.max(0.5, activeBrushWidth.value * pressureAvg);
+	if (tool.value === 'airbrush') {
+		const hardness = airbrushHardness.value;
+		const showCore = airbrushShowCore.value;
+		const blurFactor = (1 - hardness) * 1.5;
+		const lineFactor = 0.3 + 0.7 * hardness;
+		const albLw = Math.max(0.5, activeBrushWidth.value * lineFactor * (0.5 + 0.5 * pressureAvg));
+		const blur = activeBrushWidth.value * blurFactor * (0.5 + 0.5 * pressureAvg);
+		const offsetX = showCore ? 0 : CANVAS_W * 2;
+		paintLiveDrawSegment(ax - offsetX, ay, bx - offsetX, by, albLw, opaque, alpha, clip, { color: opaque, blur, offsetX, offsetY: 0 });
+		return;
+	}
+	if (tool.value === 'watercolor') {
+		// Soft-edge with shadowBlur, lower effective alpha so repeated passes build up
+		// density gradually — closer to real watercolor than a flat opacity stroke.
+		const blur = activeBrushWidth.value * watercolorBleed.value;
+		const lw = Math.max(0.5, activeBrushWidth.value * (0.4 + 0.6 * pressureAvg));
+		paintLiveDrawSegment(ax, ay, bx, by, lw, opaque, alpha * watercolorDensity.value, clip, { color: opaque, blur });
+		return;
+	}
+	if (tool.value === 'marker') {
+		// Hard-edged, multiply blend so overlapping passes darken (felt-tip / copic feel).
+		paintLiveDrawSegment(ax, ay, bx, by, baseW, opaque, alpha * markerIntensity.value, clip, undefined, 'multiply');
+		return;
+	}
+	if (tool.value === 'dodge') {
+		// Additive ('lighter') for highlight/glow buildup. The intensity slider keeps
+		// a single pass from instantly blowing out to white.
+		paintLiveDrawSegment(ax, ay, bx, by, baseW, opaque, alpha * dodgeIntensity.value, clip, undefined, 'lighter');
+		return;
+	}
+	// Default: pen
+	paintLiveDrawSegment(ax, ay, bx, by, baseW, opaque, alpha, clip);
+}
 
-// Mixer brush is rendered through the unified pen/paint/watercolor/mixer branch in
-// renderStrokeToCtx (segment-level pixel sampling + RGB lerp into a buffer that composites
-// at strokeAlpha) — no separate helper needed.
+// Mixer (smudge / 指先) — implemented as a true per-pixel blur. Each dab reads
+// the pixels under the brush footprint, computes the local mean (alpha-weighted
+// RGB so transparent pixels don't pull colour to black; alpha-density mean so
+// boundary pixels know how much to fade), and writes each pixel back as a lerp
+// toward that mean. Crucially we mutate ImageData directly rather than painting
+// with source-over, so alpha can DECREASE — without that, colour at the edge
+// of a stroke can never fade and the brush effectively just stamps colour
+// forever (the "色が残る" symptom).
+//
+// dab spacing as a fraction of the brush diameter; smaller = smoother
+const MIXER_DAB_SPACING = 0.25;
+
+function blurAtPosition(cx: number, cy: number, radius: number) {
+	const c = getLayerCtx('main');
+	const r = Math.ceil(radius);
+	const left = Math.max(0, Math.floor(cx - r));
+	const top = Math.max(0, Math.floor(cy - r));
+	const right = Math.min(CANVAS_W, Math.ceil(cx + r) + 1);
+	const bottom = Math.min(CANVAS_H, Math.ceil(cy + r) + 1);
+	const w = right - left;
+	const h = bottom - top;
+	if (w <= 0 || h <= 0) return;
+	let imgData: ImageData;
+	try {
+		imgData = c.getImageData(left, top, w, h);
+	} catch {
+		return;
+	}
+	const data = imgData.data;
+	const r2sq = radius * radius;
+
+	// Pass 1: collect alpha-weighted RGB and alpha-density mean for pixels inside
+	// the brush circle. Alpha density includes fully-transparent neighbours so
+	// boundary pixels' alpha gets pulled down — that's how edges fade out.
+	let weightedR = 0, weightedG = 0, weightedB = 0;
+	let alphaSum = 0;
+	let count = 0;
+	for (let py = 0; py < h; py++) {
+		const dyp = (top + py + 0.5) - cy;
+		const row = py * w;
+		for (let px = 0; px < w; px++) {
+			const dxp = (left + px + 0.5) - cx;
+			if (dxp * dxp + dyp * dyp > r2sq) continue;
+			const off = (row + px) * 4;
+			const a = data[off + 3];
+			weightedR += data[off] * a;
+			weightedG += data[off + 1] * a;
+			weightedB += data[off + 2] * a;
+			alphaSum += a;
+			count++;
+		}
+	}
+	if (count === 0 || alphaSum === 0) return;
+	const meanR = weightedR / alphaSum;
+	const meanG = weightedG / alphaSum;
+	const meanB = weightedB / alphaSum;
+	const meanA = alphaSum / count;
+
+	// Pass 2: lerp each in-circle pixel toward the mean. Falloff softens the dab
+	// so the centre converges fastest and the edge barely changes — without it,
+	// the dab looks like a hard-edged blur disc instead of a soft spot.
+	const baseStrength = mixerStrength.value;
+	for (let py = 0; py < h; py++) {
+		const dyp = (top + py + 0.5) - cy;
+		const row = py * w;
+		for (let px = 0; px < w; px++) {
+			const dxp = (left + px + 0.5) - cx;
+			const d2 = dxp * dxp + dyp * dyp;
+			if (d2 > r2sq) continue;
+			const falloff = 1 - Math.sqrt(d2) / radius;
+			const k = baseStrength * falloff;
+			if (k <= 0) continue;
+			const off = (row + px) * 4;
+			data[off] = data[off] * (1 - k) + meanR * k;
+			data[off + 1] = data[off + 1] * (1 - k) + meanG * k;
+			data[off + 2] = data[off + 2] * (1 - k) + meanB * k;
+			data[off + 3] = data[off + 3] * (1 - k) + meanA * k;
+		}
+	}
+	c.putImageData(imgData, left, top);
+}
+
+function mixerDrawSegment(ax: number, ay: number, bx: number, by: number, pressureAvg: number) {
+	const baseW = Math.max(0.5, activeBrushWidth.value * pressureAvg);
+	const radius = baseW / 2;
+	const dx = bx - ax;
+	const dy = by - ay;
+	const dist = Math.sqrt(dx * dx + dy * dy);
+	const step = Math.max(1, baseW * MIXER_DAB_SPACING);
+	const n = Math.max(1, Math.ceil(dist / step));
+	for (let i = 1; i <= n; i++) {
+		const t = i / n;
+		blurAtPosition(ax + dx * t, ay + dy * t, radius);
+	}
+}
 
 function renderStrokeToCtx(
 	c: CanvasRenderingContext2D,
@@ -1673,7 +2049,7 @@ function renderStrokeToCtx(
 	// Watercolor adds shadowBlur per segment for soft edges, mixer samples the target ctx
 	// at each midpoint and lerps the brush colour with the sampled pixel.
 	if (stroke.tool === 'pen' || stroke.tool === 'paint' || stroke.tool === 'watercolor' || stroke.tool === 'mixer' || stroke.tool === 'airbrush') {
-		const tmp = document.createElement('canvas');
+		const tmp = globalThis.document.createElement('canvas');
 		tmp.width = CANVAS_W;
 		tmp.height = CANVAS_H;
 		const tctx = tmp.getContext('2d');
@@ -1821,11 +2197,17 @@ function redrawAll(): Promise<void> {
 	// Reset live layers to baseline (flattened state for strokes[0..bakedCount-1]) so
 	// redraw only replays the recent un-baked window. For fresh drawings baseline is
 	// empty and this behaves like the old clear-and-full-replay.
-	for (const [dst, src] of [
-		[mainCtx!, baselineMainCanvas] as const,
-		[draftCtx!, baselineDraftCanvas] as const,
-		[lineartCtx!, baselineLineartCanvas] as const,
-	]) {
+	//
+	// Special case: when a main raster is loaded from disk, the main baseline is the
+	// raster itself (already painted into mainCanvas) and we skip resetting main from
+	// the (empty) baseline — that would erase the raster.
+	const layerResets: ReadonlyArray<readonly [CanvasRenderingContext2D, HTMLCanvasElement, 'main' | 'draft' | 'lineart']> = [
+		[mainCtx, baselineMainCanvas, 'main'] as const,
+		[draftCtx, baselineDraftCanvas, 'draft'] as const,
+		[lineartCtx, baselineLineartCanvas, 'lineart'] as const,
+	];
+	for (const [dst, src, name] of layerResets) {
+		if (name === 'main' && mainRasterLoaded) continue;
 		dst.save();
 		dst.setTransform(1, 0, 0, 1, 0, 0);
 		dst.globalCompositeOperation = 'copy';
@@ -1848,7 +2230,12 @@ function redrawAll(): Promise<void> {
 			if (myEpoch !== redrawEpoch) { resolve(); return; }
 			const end = Math.min(i + CHUNK, total);
 			for (; i < end; i++) {
-				renderStrokeToCtx(getLayerCtx(resolveStrokeLayer(snapshot[i])), snapshot[i]);
+				const s = snapshot[i];
+				const layer = resolveStrokeLayer(s);
+				// When the main raster is loaded, any main strokes still in `strokes[]` are
+				// stale (legacy or pre-migration) and would double up on top of the raster.
+				if (mainRasterLoaded && layer === 'main') continue;
+				renderStrokeToCtx(getLayerCtx(layer), s);
 			}
 			recompositeDisplay();
 			if (i < total) {
@@ -1952,6 +2339,11 @@ const canvasDisplayStyle = computed(() => {
 const TEXT_BOX_MIN_WIDTH_PX = 28;
 const TEXT_BOX_PAD_X = 10;
 const TEXT_BOX_PAD_Y = 4;
+// Standalone measurement context so the textbox computed style can call measureText
+// without mutating the live mainCtx state (which would be a side effect inside a
+// computed property).
+const textMeasureCanvas = globalThis.document.createElement('canvas');
+const textMeasureCtx: CanvasRenderingContext2D = get2dCtx(textMeasureCanvas);
 
 const textBoxStyle = computed(() => {
 	if (!textCursor.value) return null;
@@ -1973,23 +2365,21 @@ const textBoxStyle = computed(() => {
 	const lineHeightCSS = fontPxCSS * 1.4;
 
 	// Measure widest line in the buffer using the same font we'll commit with, so the
-	// textarea matches the eventual rendered stroke width.
+	// textarea matches the eventual rendered stroke width. The font assignment looks like
+	// a side effect to the lint rule, but textMeasureCtx is a private measurement-only
+	// canvas — no other code observes its state.
 	let widthCSS = TEXT_BOX_MIN_WIDTH_PX;
-	let lineCount = 1;
-	if (mainCtx) {
-		const text = textBoxValue.value;
-		const lines = text.length > 0 ? text.split('\n') : [''];
-		lineCount = lines.length;
-		mainCtx.save();
-		mainCtx.font = `${fontPxCanvas}px sans-serif`;
-		let maxW = 0;
-		for (const line of lines) {
-			const m = mainCtx.measureText(line);
-			if (m.width > maxW) maxW = m.width;
-		}
-		mainCtx.restore();
-		widthCSS = Math.max(TEXT_BOX_MIN_WIDTH_PX, Math.ceil(maxW * displayScale + TEXT_BOX_PAD_X));
+	const text = textBoxValue.value;
+	const lines = text.length > 0 ? text.split('\n') : [''];
+	const lineCount = lines.length;
+	// eslint-disable-next-line vue/no-side-effects-in-computed-properties -- measurement-only canvas, see comment above
+	textMeasureCtx.font = `${fontPxCanvas}px sans-serif`;
+	let maxW = 0;
+	for (const line of lines) {
+		const m = textMeasureCtx.measureText(line);
+		if (m.width > maxW) maxW = m.width;
 	}
+	widthCSS = Math.max(TEXT_BOX_MIN_WIDTH_PX, Math.ceil(maxW * displayScale + TEXT_BOX_PAD_X));
 	const heightCSS = Math.ceil(lineCount * lineHeightCSS + TEXT_BOX_PAD_Y);
 
 	return {
@@ -2061,9 +2451,9 @@ function onCanvasPointerLeave(ev: PointerEvent) {
 function consumeStabilized(): [number, number, number] | null {
 	const n = smoothing.value + 1;
 	if (rawBuffer.length < n) return null;
-	const window = rawBuffer.slice(-n);
+	const samples = rawBuffer.slice(-n);
 	let sx = 0, sy = 0, sp = 0;
-	for (const [x, y, p] of window) { sx += x; sy += y; sp += p; }
+	for (const [x, y, p] of samples) { sx += x; sy += y; sp += p; }
 	return [sx / n, sy / n, sp / n];
 }
 
@@ -2075,9 +2465,9 @@ function flushStabilizerTail(): [number, number, number][] {
 	while (n > 1 && rawBuffer.length > 0) {
 		n--;
 		if (rawBuffer.length < n) continue;
-		const window = rawBuffer.slice(-n);
+		const samples = rawBuffer.slice(-n);
 		let sx = 0, sy = 0, sp = 0;
-		for (const [x, y, p] of window) { sx += x; sy += y; sp += p; }
+		for (const [x, y, p] of samples) { sx += x; sy += y; sp += p; }
 		out.push([sx / n, sy / n, sp / n]);
 	}
 	if (rawBuffer.length > 0) out.push(rawBuffer[rawBuffer.length - 1]);
@@ -2094,8 +2484,9 @@ function commitTextAt(x: number, y: number) {
 	if (!text.trim()) return;
 	const layerForStroke = effectiveLayerForNewStroke();
 	grabPreStrokeSnapshot(layerForStroke);
+	const textStrokeId = newStrokeId();
 	const stroke: ChatDrawingStroke = {
-		id: newStrokeId(),
+		id: textStrokeId,
 		points: [[x, y]],
 		color: composedColor.value,
 		width: activeBrushWidth.value / CANVAS_W,
@@ -2106,7 +2497,7 @@ function commitTextAt(x: number, y: number) {
 	strokes.value.push(stroke);
 	renderStroke(stroke);
 	props.connection.send('drawStroke', { drawingId: props.drawingId, stroke });
-	myUndoStack.value.push(stroke.id!);
+	myUndoStack.value.push(textStrokeId);
 	myRedoStack.value = [];
 	commitStrokePatch(stroke);
 	maybeBakeOverflow();
@@ -2207,22 +2598,20 @@ function onPointerDown(ev: PointerEvent) {
 	}
 
 	if (tool.value === 'fill') {
-		grabPreStrokeSnapshot(currentLayer.value);
+		// Fill is a main-only tool: always lands on the main raster layer, regardless
+		// of the active layer or clip mode. Render locally then broadcast as a tile patch.
+		grabPreStrokeSnapshot('main');
+		const fillStrokeId = newStrokeId();
 		const stroke: ChatDrawingStroke = {
-			id: newStrokeId(),
+			id: fillStrokeId,
 			points: [[point[0], point[1]]],
 			color: composedColor.value,
 			width: 0,
 			tool: 'fill',
-			layer: currentLayer.value,
+			layer: 'main',
 		};
-		strokes.value.push(stroke);
 		renderStroke(stroke);
-		props.connection.send('drawStroke', { drawingId: props.drawingId, stroke });
-		myUndoStack.value.push(stroke.id!);
-		myRedoStack.value = [];
-		commitStrokePatch(stroke);
-		maybeBakeOverflow();
+		void commitMainRasterStroke(fillStrokeId, computeStrokeBbox(stroke), 'source-over');
 		recordRecentColor(color.value);
 		return;
 	}
@@ -2255,9 +2644,11 @@ function onPointerDown(ev: PointerEvent) {
 		return;
 	}
 
-	const usesBrushBuffer = tool.value === 'pen' || tool.value === 'airbrush';
+	const usesBrushBuffer = tool.value === 'pen' || tool.value === 'airbrush' || tool.value === 'watercolor' || tool.value === 'marker' || tool.value === 'dodge';
+	const usesMixer = tool.value === 'mixer';
 	if (usesBrushBuffer) {
-		// All brush-style tools route through the live buffer to suppress the bead artefact.
+		// All buffer-based brush tools route through the live buffer to suppress the
+		// bead artefact (alpha doubling at segment endpoints).
 		startPaintLive(layerForStroke);
 	}
 
@@ -2268,30 +2659,24 @@ function onPointerDown(ev: PointerEvent) {
 		const ix = point[0] * CANVAS_W;
 		const iy = point[1] * CANVAS_H;
 		const ipr = point[2];
-		const baseLw = Math.max(0.5, activeBrushWidth.value * ipr);
 		const [pr, pg, pbb, palpha] = parseColorRGBA(composedColor.value);
 		const opaque = `rgb(${pr},${pg},${pbb})`;
 		const clip = effectiveClipForNewStroke();
 		const alpha = palpha / 255;
-		if (tool.value === 'airbrush') {
-			const hardness = airbrushHardness.value;
-			const showCore = airbrushShowCore.value;
-			const blurFactor = (1 - hardness) * 1.5;
-			const lineFactor = 0.3 + 0.7 * hardness;
-			const albLw = Math.max(0.5, activeBrushWidth.value * lineFactor * (0.5 + 0.5 * ipr));
-			const blur = activeBrushWidth.value * blurFactor * (0.5 + 0.5 * ipr);
-			const offsetX = showCore ? 0 : CANVAS_W * 2;
-			paintLiveDrawSegment(ix - offsetX, iy, ix - offsetX + 0.01, iy + 0.01, albLw, opaque, alpha, clip, { color: opaque, blur, offsetX, offsetY: 0 });
-		} else {
-			paintLiveDrawSegment(ix, iy, ix + 0.01, iy + 0.01, baseLw, opaque, alpha, clip);
-		}
+		brushBufferStamp(ix, iy, ix + 0.01, iy + 0.01, ipr, opaque, alpha, clip);
+		recompositeDisplay();
+	} else if (usesMixer) {
+		// Mixer's "stamp" at pointer-down samples and draws a single dot at the start.
+		mixerDrawSegment(point[0] * CANVAS_W, point[1] * CANVAS_H, point[0] * CANVAS_W + 0.01, point[1] * CANVAS_H + 0.01, point[2]);
 		recompositeDisplay();
 	} else {
 		renderStroke({
 			points: [point],
 			color: composedColor.value,
 			width: activeBrushWidth.value / CANVAS_W,
-			tool: tool.value,
+			// Cast: only eraser falls through here at runtime (the raster-only branches
+			// above caught everything else); 'eraser' is in the wire union.
+			tool: tool.value as ChatDrawingStroke['tool'],
 			layer: layerForStroke,
 			...(effectiveClipForNewStroke() ? { clip: true } : {}),
 		});
@@ -2358,28 +2743,22 @@ function onPointerMove(ev: PointerEvent) {
 
 	const avgP = (last[2] + next[2]) / 2;
 	const c = getLayerCtx(preStrokeLayerTarget ?? currentLayer.value);
-	if (tool.value === 'pen' || tool.value === 'airbrush') {
-		const ax = last[0] * CANVAS_W;
-		const ay = last[1] * CANVAS_H;
-		const bx = next[0] * CANVAS_W;
-		const by = next[1] * CANVAS_H;
-		const baseLw = Math.max(0.5, activeBrushWidth.value * avgP);
+	const ax = last[0] * CANVAS_W;
+	const ay = last[1] * CANVAS_H;
+	const bx = next[0] * CANVAS_W;
+	const by = next[1] * CANVAS_H;
+	if (tool.value === 'pen' || tool.value === 'airbrush' || tool.value === 'watercolor' || tool.value === 'marker' || tool.value === 'dodge') {
 		const [pr, pg, pbb, palpha] = parseColorRGBA(composedColor.value);
 		const opaque = `rgb(${pr},${pg},${pbb})`;
 		const clip = effectiveClipForNewStroke();
 		const alpha = palpha / 255;
-		if (tool.value === 'airbrush') {
-			const hardness = airbrushHardness.value;
-			const showCore = airbrushShowCore.value;
-			const blurFactor = (1 - hardness) * 1.5;
-			const lineFactor = 0.3 + 0.7 * hardness;
-			const albLw = Math.max(0.5, activeBrushWidth.value * lineFactor * (0.5 + 0.5 * avgP));
-			const blur = activeBrushWidth.value * blurFactor * (0.5 + 0.5 * avgP);
-			const offsetX = showCore ? 0 : CANVAS_W * 2;
-			paintLiveDrawSegment(ax - offsetX, ay, bx - offsetX, by, albLw, opaque, alpha, clip, { color: opaque, blur, offsetX, offsetY: 0 });
-		} else {
-			paintLiveDrawSegment(ax, ay, bx, by, baseLw, opaque, alpha, clip);
-		}
+		brushBufferStamp(ax, ay, bx, by, avgP, opaque, alpha, clip);
+		recompositeDisplay();
+		currentPoints.push(next);
+		return;
+	}
+	if (tool.value === 'mixer') {
+		mixerDrawSegment(ax, ay, bx, by, avgP);
 		recompositeDisplay();
 		currentPoints.push(next);
 		return;
@@ -2432,8 +2811,9 @@ function onPointerUp(ev: PointerEvent) {
 			c.putImageData(preStrokeLayerSnapshot, 0, 0);
 			recompositeDisplay();
 		}
+		const lineStrokeId = newStrokeId();
 		const stroke: ChatDrawingStroke = {
-			id: newStrokeId(),
+			id: lineStrokeId,
 			points: [
 				[lineStart[0], lineStart[1], 1],
 				[finalEnd[0], finalEnd[1], 1],
@@ -2444,10 +2824,18 @@ function onPointerUp(ev: PointerEvent) {
 			layer: lineLayer,
 			...(lineClip ? { clip: true } : {}),
 		};
+		if (lineLayer === 'main') {
+			renderStroke(stroke);
+			void commitMainRasterStroke(lineStrokeId, computeStrokeBbox(stroke), lineClip ? 'source-atop' : 'source-over');
+			recordRecentColor(color.value);
+			lineStart = null;
+			if (pendingRemoteRedraw) void flushPendingRedraw();
+			return;
+		}
 		strokes.value.push(stroke);
 		renderStroke(stroke);
 		props.connection.send('drawStroke', { drawingId: props.drawingId, stroke });
-		myUndoStack.value.push(stroke.id!);
+		myUndoStack.value.push(lineStrokeId);
 		myRedoStack.value = [];
 		commitStrokePatch(stroke);
 		maybeBakeOverflow();
@@ -2460,35 +2848,28 @@ function onPointerUp(ev: PointerEvent) {
 	// Flush any un-averaged tail so the visible stroke lands on the actual pointer end.
 	const tail = flushStabilizerTail();
 	for (const next of tail) {
+		if (currentPoints.length === 0) { currentPoints.push(next); continue; }
 		const last = currentPoints[currentPoints.length - 1];
-		if (!last) { currentPoints.push(next); continue; }
 		const dx = (next[0] - last[0]) * CANVAS_W;
 		const dy = (next[1] - last[1]) * CANVAS_H;
 		if (dx * dx + dy * dy < 1) continue;
 		const avgP = (last[2] + next[2]) / 2;
 		const c = getLayerCtx(preStrokeLayerTarget ?? currentLayer.value);
-		if (tool.value === 'pen' || tool.value === 'airbrush') {
-			const ax = last[0] * CANVAS_W;
-			const ay = last[1] * CANVAS_H;
-			const bx = next[0] * CANVAS_W;
-			const by = next[1] * CANVAS_H;
-			const baseLw = Math.max(0.5, activeBrushWidth.value * avgP);
+		const ax = last[0] * CANVAS_W;
+		const ay = last[1] * CANVAS_H;
+		const bx = next[0] * CANVAS_W;
+		const by = next[1] * CANVAS_H;
+		if (tool.value === 'pen' || tool.value === 'airbrush' || tool.value === 'watercolor' || tool.value === 'marker' || tool.value === 'dodge') {
 			const [pr, pg, pbb, palpha] = parseColorRGBA(composedColor.value);
 			const opaque = `rgb(${pr},${pg},${pbb})`;
 			const clip = effectiveClipForNewStroke();
 			const alpha = palpha / 255;
-			if (tool.value === 'airbrush') {
-				const hardness = airbrushHardness.value;
-				const showCore = airbrushShowCore.value;
-				const blurFactor = (1 - hardness) * 1.5;
-				const lineFactor = 0.3 + 0.7 * hardness;
-				const albLw = Math.max(0.5, activeBrushWidth.value * lineFactor * (0.5 + 0.5 * avgP));
-				const blur = activeBrushWidth.value * blurFactor * (0.5 + 0.5 * avgP);
-				const offsetX = showCore ? 0 : CANVAS_W * 2;
-				paintLiveDrawSegment(ax - offsetX, ay, bx - offsetX, by, albLw, opaque, alpha, clip, { color: opaque, blur, offsetX, offsetY: 0 });
-			} else {
-				paintLiveDrawSegment(ax, ay, bx, by, baseLw, opaque, alpha, clip);
-			}
+			brushBufferStamp(ax, ay, bx, by, avgP, opaque, alpha, clip);
+			currentPoints.push(next);
+			continue;
+		}
+		if (tool.value === 'mixer') {
+			mixerDrawSegment(ax, ay, bx, by, avgP);
 			currentPoints.push(next);
 			continue;
 		}
@@ -2500,8 +2881,8 @@ function onPointerUp(ev: PointerEvent) {
 		c.globalAlpha = 1;
 		c.lineWidth = Math.max(0.5, activeBrushWidth.value * avgP);
 		c.beginPath();
-		c.moveTo(last[0] * CANVAS_W, last[1] * CANVAS_H);
-		c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
+		c.moveTo(ax, ay);
+		c.lineTo(bx, by);
 		c.stroke();
 		c.restore();
 		currentPoints.push(next);
@@ -2515,15 +2896,21 @@ function onPointerUp(ev: PointerEvent) {
 	}
 
 	// tool.value is a ref so TS doesn't narrow across the earlier branches that return
-	// for line/fill/spoit — explicitly coerce to the committable tool set.
-	const commitTool: 'pen' | 'eraser' | 'airbrush' =
+	// for line/fill/spoit — explicitly coerce to the committable tool set. The new
+	// raster-only tools (marker / dodge) aren't in the wire union; since they always
+	// go through the main-raster path (their strokes never serialise), we fall them
+	// back to 'pen' on the stroke object — only the bbox is used downstream.
+	const commitTool: ChatDrawingStroke['tool'] =
 		tool.value === 'eraser' ? 'eraser' :
 		tool.value === 'airbrush' ? 'airbrush' :
+		tool.value === 'watercolor' ? 'watercolor' :
+		tool.value === 'mixer' ? 'mixer' :
 		'pen';
 	const commitLayer = preStrokeLayerTarget ?? currentLayer.value;
 	const commitClip = effectiveClipForNewStroke() && commitTool !== 'eraser';
+	const commitStrokeId = newStrokeId();
 	const stroke: ChatDrawingStroke = {
-		id: newStrokeId(),
+		id: commitStrokeId,
 		points: currentPoints,
 		color: composedColor.value,
 		width: activeBrushWidth.value / CANVAS_W,
@@ -2534,9 +2921,23 @@ function onPointerUp(ev: PointerEvent) {
 	};
 	currentPoints = [];
 
+	if (commitLayer === 'main') {
+		// Pixels are already on mainCanvas (via paintLiveDrawSegment for pen/airbrush, or
+		// destination-out direct draw for eraser). Just dirty-rect-snapshot, broadcast as
+		// a tile patch, and record undo history. Do NOT push to strokes[].
+		const composite: 'source-over' | 'destination-out' | 'source-atop' =
+			commitTool === 'eraser' ? 'destination-out' :
+			commitClip ? 'source-atop' :
+			'source-over';
+		void commitMainRasterStroke(commitStrokeId, computeStrokeBbox(stroke), composite);
+		if (tool.value !== 'eraser') recordRecentColor(color.value);
+		if (pendingRemoteRedraw) void flushPendingRedraw();
+		return;
+	}
+
 	strokes.value.push(stroke);
 	props.connection.send('drawStroke', { drawingId: props.drawingId, stroke });
-	myUndoStack.value.push(stroke.id!);
+	myUndoStack.value.push(commitStrokeId);
 	myRedoStack.value = [];
 	commitStrokePatch(stroke);
 	maybeBakeOverflow();
@@ -2550,9 +2951,18 @@ function onPointerUp(ev: PointerEvent) {
 function onRemoteStroke(payload: { userId: string; drawingId: string; stroke: ChatDrawingStroke }) {
 	if (payload.drawingId !== props.drawingId) return;
 	if (payload.userId === $i.id) return;
+	// Defensive: a stricter peer should never broadcast main strokes through the vector
+	// channel, but if a legacy client does, fall through to the existing render path
+	// which routes to the appropriate layer canvas.
 	strokes.value.push(payload.stroke);
 	renderStroke(payload.stroke);
 	maybeBakeOverflow();
+}
+
+function onRemoteTilePatch(payload: { userId: string; drawingId: string; patch: ChatDrawingTilePatch }) {
+	if (payload.drawingId !== props.drawingId) return;
+	if (payload.userId === $i.id) return;
+	void applyTilePatch(payload.patch);
 }
 
 function onRemoteClear(payload: { userId: string; drawingId: string }) {
@@ -2560,6 +2970,9 @@ function onRemoteClear(payload: { userId: string; drawingId: string }) {
 	strokes.value = [];
 	resetBaseline();
 	clearCanvas();
+	clearMainRasterPatches();
+	mainRasterRedoHistory.clear();
+	mainRasterLoaded = false;
 }
 
 function onRemotePresence(payload: { drawingId: string; userId: string; user: Misskey.entities.UserLite }) {
@@ -2579,12 +2992,57 @@ async function applyRemoteDrawingUpdate(drawingId: string) {
 		myUndoStack.value = [];
 		myRedoStack.value = [];
 		clearStrokePatches();
+		clearMainRasterPatches();
+		mainRasterRedoHistory.clear();
 		resetBaseline();
+		await loadMainRasterFromUrl(fresh.mainImageUrl);
 		await redrawAll();
+		await applyLiveTilePatchesIfAny(fresh.liveTilePatches);
 		// Flatten the replayed state into the baseline so subsequent redraws are cheap.
 		snapshotBaselineFromLive();
 	} catch (err) {
 		console.error('failed to reload drawing', err);
+	}
+}
+
+// Fetch the main raster PNG by URL and paint it into mainCanvas (replacing any prior
+// pixels). No-op when the drawing has no main raster yet (legacy / never-saved).
+async function loadMainRasterFromUrl(url: string | null | undefined) {
+	if (!url) {
+		mainRasterLoaded = false;
+		return;
+	}
+	try {
+		const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+			const i = new Image();
+			i.crossOrigin = 'anonymous';
+			i.onload = () => resolve(i);
+			i.onerror = err => reject(err);
+			// Cache-busting query param off — the server already rotates the access key
+			// on every save, so each URL is permanently cacheable.
+			i.src = url;
+		});
+		ensureLayerCanvases();
+		const c = getLayerCtx('main');
+		c.save();
+		c.setTransform(1, 0, 0, 1, 0, 0);
+		c.globalCompositeOperation = 'copy';
+		c.drawImage(img, 0, 0, CANVAS_W, CANVAS_H);
+		c.restore();
+		mainRasterLoaded = true;
+	} catch (err) {
+		console.error('failed to load main raster', err);
+		mainRasterLoaded = false;
+	}
+}
+
+// Apply server-buffered tile patches that have not yet been folded into the main
+// raster on disk. Patches are applied in order so they reproduce the same composite
+// stack as the authors' canvases.
+async function applyLiveTilePatchesIfAny(patches: ChatDrawingTilePatch[] | undefined) {
+	if (!patches || patches.length === 0) return;
+	for (const p of patches) {
+		await applyTilePatch(p);
 	}
 }
 
@@ -2619,6 +3077,9 @@ function clearAll() {
 	myUndoStack.value = [];
 	myRedoStack.value = [];
 	clearStrokePatches();
+	clearMainRasterPatches();
+	mainRasterRedoHistory.clear();
+	mainRasterLoaded = false;
 	props.connection.send('drawClear', { drawingId: props.drawingId });
 }
 
@@ -2628,12 +3089,43 @@ const currentLayerLabel = computed(() => {
 	return '塗りレイヤー';
 });
 
+// Layer cycling is disabled while a main-only tool (fill / airbrush) is active.
+// The watcher on `tool` keeps `currentLayer` pinned to 'main' in that case, so this
+// flag is what the toolbar uses to gray out the cycle button and explain why.
+const layerToggleDisabled = computed(() => MAIN_ONLY_TOOLS.has(tool.value));
+
+// Raster-only tools (fill / airbrush) only make sense on the main raster layer; on
+// draft/lineart they would land on main anyway (per `effectiveLayerForNewStroke`),
+// so hide them entirely on those layers to avoid the UI implying they edit the
+// active layer.
+const rasterToolsVisible = computed(() => currentLayer.value === 'main');
+
+// True when the currently-selected tool has its own adjustable parameters that
+// should appear in the tool-specific zone of the toolbar. Used to hide the zone
+// entirely when no params are relevant (pen / line / eraser / text / fill /
+// spoit / hand).
+const hasToolParams = computed(() => (
+	tool.value === 'airbrush'
+	|| tool.value === 'watercolor'
+	|| tool.value === 'marker'
+	|| tool.value === 'mixer'
+	|| tool.value === 'dodge'
+));
+
 function toggleLayer() {
 	// main → 下描き → 線画 → main
 	if (currentLayer.value === 'main') currentLayer.value = 'draft';
 	else if (currentLayer.value === 'draft') currentLayer.value = 'lineart';
 	else currentLayer.value = 'main';
 }
+
+// If the user switches off main while a raster-only tool is selected, fall back to
+// pen so the toolbar selection stays consistent with what's now visible.
+watch(currentLayer, layer => {
+	if (layer !== 'main' && MAIN_ONLY_TOOLS.has(tool.value)) {
+		tool.value = 'pen';
+	}
+});
 
 // Re-composite whenever the draft opacity slider moves so the user sees the change live.
 watch(draftOpacity, () => recompositeDisplay());
@@ -2642,8 +3134,6 @@ function clampZoom(z: number): number {
 	return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
 }
 
-function zoomIn() { zoom.value = clampZoom(zoom.value * 1.25); }
-function zoomOut() { zoom.value = clampZoom(zoom.value / 1.25); }
 // Treat the % label as a "reset view" — also recentre and unrotate so a user who got lost
 // (panned far off-screen) has one click to return to a sane state.
 function zoomReset() {
@@ -2734,6 +3224,43 @@ function removeStrokeById(strokeId: string): ChatDrawingStroke | null {
 function undo() {
 	const id = myUndoStack.value.pop();
 	if (!id) return;
+	// Main-raster path: id is keyed in mainRasterPatchHistory rather than strokes[].
+	// Paint `before` back, broadcast a tile patch carrying the same pixels so peers
+	// converge on the rolled-back state, and stash the entry into the redo history.
+	const rasterPatch = mainRasterPatchHistory.get(id);
+	if (rasterPatch) {
+		const c = getLayerCtx('main');
+		c.putImageData(rasterPatch.before, rasterPatch.x, rasterPatch.y);
+		recompositeDisplay();
+		// Send a `source-over` patch of `before` so peers also roll back. We can't use
+		// the original composite because for `destination-out`/`source-atop` the inverse
+		// requires the full rect with source-over.
+		void imageDataToBase64Png(rasterPatch.before).then(dataBase64 => {
+			if (!dataBase64) return;
+			const undoPatch: ChatDrawingTilePatch = {
+				x: rasterPatch.x,
+				y: rasterPatch.y,
+				width: rasterPatch.before.width,
+				height: rasterPatch.before.height,
+				dataBase64,
+				composite: 'source-over',
+			};
+			props.connection.send('drawTilePatch', { drawingId: props.drawingId, patch: undoPatch } as never);
+		});
+		mainRasterPatchHistory.delete(id);
+		// Push a synthetic redo marker; we re-key it under the same id when redo runs.
+		myRedoStack.value.push({
+			id,
+			points: [],
+			color: '#000000',
+			width: 0,
+			tool: 'pen',
+			layer: 'main',
+		});
+		// Stash the redo info so redo can restore `after` without round-tripping through render.
+		mainRasterRedoHistory.set(id, rasterPatch);
+		return;
+	}
 	const idx = strokes.value.findIndex(s => s.id === id);
 	const removed = idx >= 0 ? strokes.value[idx] : null;
 	const patch = strokePatches.get(id);
@@ -2753,9 +3280,43 @@ function undo() {
 	props.connection.send('drawUndo', { drawingId: props.drawingId, strokeId: id });
 }
 
+// Mirror of mainRasterPatchHistory used during redo to restore the `after` state.
+const mainRasterRedoHistory = new Map<string, MainRasterPatch>();
+
+// True once a main raster was loaded from a `mainImageUrl`. While this is true,
+// redrawAll() and the renderer skip any main-layer strokes still in `strokes[]` —
+// they've been baked into mainCanvas and replaying them would double them up.
+let mainRasterLoaded = false;
+
 function redo() {
 	const stroke = myRedoStack.value.pop();
 	if (!stroke || !stroke.id) return;
+	// Main-raster redo: the stroke object is a synthetic placeholder; the real data is
+	// keyed in mainRasterRedoHistory. Paint `after` back, restore patch into the live
+	// history, and broadcast.
+	const cachedRasterRedo = stroke.layer === 'main' ? mainRasterRedoHistory.get(stroke.id) : undefined;
+	if (cachedRasterRedo) {
+		const r = cachedRasterRedo;
+		const c = getLayerCtx('main');
+		c.putImageData(r.after, r.x, r.y);
+		recompositeDisplay();
+		mainRasterPatchHistory.set(stroke.id, r);
+		mainRasterRedoHistory.delete(stroke.id);
+		myUndoStack.value.push(stroke.id);
+		void imageDataToBase64Png(r.after).then(dataBase64 => {
+			if (!dataBase64) return;
+			const patch: ChatDrawingTilePatch = {
+				x: r.x,
+				y: r.y,
+				width: r.after.width,
+				height: r.after.height,
+				dataBase64,
+				composite: 'source-over',
+			};
+			props.connection.send('drawTilePatch', { drawingId: props.drawingId, patch });
+		});
+		return;
+	}
 	// Capture the pre-state before re-applying, so the next undo can use the fast path too.
 	grabPreStrokeSnapshot(resolveStrokeLayer(stroke));
 	strokes.value.push(stroke);
@@ -2802,22 +3363,10 @@ function sendPresence() {
 	props.connection.send('drawingPresence', { drawingId: props.drawingId });
 }
 
-// Render the published composite (white bg + main + lineart, no draft) to a fresh
-// offscreen canvas and return it as a base64-encoded PNG. Used on save to hand the
-// bit-exact image to the server so it can skip the heavy stroke replay.
-async function bakeCompositePngBase64(): Promise<string | null> {
-	ensureLayerCanvases();
-	const out = document.createElement('canvas');
-	out.width = CANVAS_W;
-	out.height = CANVAS_H;
-	const octx = out.getContext('2d');
-	if (!octx) return null;
-	octx.fillStyle = '#ffffff';
-	octx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-	octx.drawImage(mainCanvas, 0, 0);
-	octx.drawImage(lineartCanvas, 0, 0);
+// Encode a canvas to a base64 PNG using a low-allocation chunked btoa.
+async function canvasToBase64Png(c: HTMLCanvasElement): Promise<string | null> {
 	return await new Promise<string | null>(resolve => {
-		out.toBlob(async b => {
+		c.toBlob(async b => {
 			if (!b) { resolve(null); return; }
 			const buf = await b.arrayBuffer();
 			const bytes = new Uint8Array(buf);
@@ -2831,6 +3380,31 @@ async function bakeCompositePngBase64(): Promise<string | null> {
 	});
 }
 
+// Render the published composite (white bg + main + lineart, no draft) to a fresh
+// offscreen canvas and return it as a base64-encoded PNG. Used on save to hand the
+// bit-exact image to the server so it can skip the heavy stroke replay.
+async function bakeCompositePngBase64(): Promise<string | null> {
+	ensureLayerCanvases();
+	const out = globalThis.document.createElement('canvas');
+	out.width = CANVAS_W;
+	out.height = CANVAS_H;
+	const octx = out.getContext('2d');
+	if (!octx) return null;
+	octx.fillStyle = '#ffffff';
+	octx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+	octx.drawImage(mainCanvas, 0, 0);
+	octx.drawImage(lineartCanvas, 0, 0);
+	return await canvasToBase64Png(out);
+}
+
+// Encode the main (raster) layer alone — transparent background — for the dedicated
+// `mainImageBase64` channel of the update API. The server keeps this as the canonical
+// state of the main layer between sessions.
+async function bakeMainRasterPngBase64(): Promise<string | null> {
+	ensureLayerCanvases();
+	return await canvasToBase64Png(mainCanvas);
+}
+
 async function saveAndClose() {
 	if (saving.value) return;
 	// Flush any pending text-tool buffer at the last known cursor position so a typed-but-
@@ -2840,13 +3414,20 @@ async function saveAndClose() {
 	}
 	saving.value = true;
 	try {
-		const imageBase64 = await bakeCompositePngBase64();
+		const [imageBase64, mainImageBase64] = await Promise.all([
+			bakeCompositePngBase64(),
+			bakeMainRasterPngBase64(),
+		]);
+		// Drop any main strokes from the persisted set — main lives in the raster now.
+		// Legacy drawings that loaded with main strokes get migrated here automatically.
+		const persistedStrokes = strokes.value.filter((s: ChatDrawingStroke) => s.layer === 'draft' || s.layer === 'lineart');
 		await apiChatDrawingUpdate({
 			drawingId: props.drawingId,
-			strokes: strokes.value,
+			strokes: persistedStrokes,
 			...(imageBase64 ? { imageBase64 } : {}),
+			...(mainImageBase64 ? { mainImageBase64 } : {}),
 		});
-		close();
+		closeWindow();
 	} catch (err) {
 		console.error(err);
 		os.alert({ type: 'error', text: i18n.ts.somethingHappened });
@@ -2855,7 +3436,7 @@ async function saveAndClose() {
 	}
 }
 
-function close() {
+function closeWindow() {
 	windowEl.value?.close();
 }
 
@@ -2864,13 +3445,14 @@ onMounted(async () => {
 	// Observe the canvas scroll container so display size tracks window resizes.
 	if (canvasContainerEl.value) {
 		resizeObserver = new ResizeObserver(entries => {
-			for (const e of entries) {
-				containerSize.value = { w: e.contentRect.width, h: e.contentRect.height };
+			for (const entry of entries) {
+				containerSize.value = { w: entry.contentRect.width, h: entry.contentRect.height };
 			}
 		});
 		resizeObserver.observe(canvasContainerEl.value);
 	}
 	props.connection.on('drawStroke', onRemoteStroke);
+	props.connection.on('drawTilePatch', onRemoteTilePatch);
 	props.connection.on('drawClear', onRemoteClear);
 	props.connection.on('drawingUpdated', onRemoteDrawingUpdated);
 	props.connection.on('drawingPresence', onRemotePresence);
@@ -2881,10 +3463,15 @@ onMounted(async () => {
 
 	try {
 		const fresh = await apiChatDrawingShow(props.drawingId);
-		title.value = fresh.title ?? '';
+		title.value = fresh.title;
 		strokes.value = fresh.strokes;
 		resetBaseline();
+		// Paint the main raster first so cross-layer fill replay (lineart sampling main)
+		// sees the right pixels. Then replay non-main vector strokes via redrawAll, which
+		// is now a no-op for main-layer entries when a raster is already loaded.
+		await loadMainRasterFromUrl(fresh.mainImageUrl);
 		await redrawAll();
+		await applyLiveTilePatchesIfAny(fresh.liveTilePatches);
 		// Flatten the loaded state into the baseline so any subsequent redraw is O(recent)
 		// instead of re-replaying every stored stroke.
 		snapshotBaselineFromLive();
@@ -2897,13 +3484,14 @@ onMounted(async () => {
 
 	// announce presence and heartbeat
 	sendPresence();
-	presenceInterval = setInterval(sendPresence, PRESENCE_HEARTBEAT_MS);
+	presenceInterval = globalThis.setInterval(sendPresence, PRESENCE_HEARTBEAT_MS);
 	// tick for expiring stale participants in the UI
-	tickInterval = setInterval(() => { now.value = Date.now(); }, 3000);
+	tickInterval = globalThis.setInterval(() => { now.value = Date.now(); }, 3000);
 });
 
 onBeforeUnmount(() => {
 	props.connection.off('drawStroke', onRemoteStroke);
+	props.connection.off('drawTilePatch', onRemoteTilePatch);
 	props.connection.off('drawClear', onRemoteClear);
 	props.connection.off('drawingUpdated', onRemoteDrawingUpdated);
 	props.connection.off('drawingPresence', onRemotePresence);
@@ -2911,8 +3499,8 @@ onBeforeUnmount(() => {
 	props.connection.off('drawingCursor', onRemoteCursor);
 	window.removeEventListener('keydown', onKeyDown);
 	window.removeEventListener('mousedown', closeColorPopoverOnOutside);
-	if (presenceInterval) clearInterval(presenceInterval);
-	if (tickInterval) clearInterval(tickInterval);
+	if (presenceInterval) globalThis.clearInterval(presenceInterval);
+	if (tickInterval) globalThis.clearInterval(tickInterval);
 	if (resizeObserver) resizeObserver.disconnect();
 });
 </script>
@@ -2987,6 +3575,54 @@ onBeforeUnmount(() => {
 	height: 22px;
 	background: var(--MI_THEME-divider);
 	opacity: 0.6;
+}
+
+// Lighter divider used to subgroup buttons inside the same toolGroup (e.g. to
+// visually separate drawing brushes from helper tools without breaking the row).
+.subseparator {
+	width: 1px;
+	height: 14px;
+	background: var(--MI_THEME-divider);
+	opacity: 0.3;
+	margin: 0 2px;
+}
+
+// Reserve layout space without rendering pixels — used for raster-only tools
+// when the active layer isn't main, so the auxiliary subgroup behind them stays
+// in a fixed position instead of shifting left when raster tools disappear.
+.invisible {
+	visibility: hidden;
+	pointer-events: none;
+}
+
+// Extra-wide gap before destructive controls (clear-all). Wider than the regular
+// .spacer so the trash button doesn't sit directly next to other clickable
+// controls — physical distance is the cheapest mis-click prevention.
+.dangerSpacer {
+	flex: 0 0 32px;
+}
+
+// Destructive action button — red tint to signal "this wipes everything".
+// Hover lights it up further so the user has a clear visual moment to commit.
+.dangerButton {
+	color: var(--MI_THEME-error, #e64545);
+
+	&:hover:not(:disabled) {
+		background: color-mix(in srgb, var(--MI_THEME-error, #e64545) 18%, transparent);
+		color: var(--MI_THEME-error, #e64545);
+	}
+}
+
+// Wrapper for the contextual "settings of the currently-selected tool" zone in
+// row 2. Tinted so it reads as a distinct sub-area (= these controls change
+// when you switch tool, unlike the common brush params next to it).
+.toolParams {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 6px;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--MI_THEME-accentedBg) 80%, transparent);
 }
 
 .toolLabel {

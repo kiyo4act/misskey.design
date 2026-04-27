@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import ms from 'ms';
 import { Endpoint } from '@/server/api/endpoint-base.js';
 import { ApiError } from '@/server/api/error.js';
@@ -57,6 +57,11 @@ export const paramDef = {
 		// it directly instead of re-running the full stroke replay — the usual hot path
 		// for saves on drawings with many fills.
 		imageBase64: { type: 'string', nullable: true },
+		// Optional client-baked main (raster) layer PNG (base64). When present, this is
+		// the new canonical state of the main layer; lineart and draft strokes still
+		// arrive in `strokes`. Omit only when the save changed nothing on main (the
+		// server will reuse whatever main raster was previously stored).
+		mainImageBase64: { type: 'string', nullable: true },
 	},
 	required: ['drawingId', 'strokes'],
 } as const;
@@ -78,18 +83,21 @@ export default class extends Endpoint<typeof meta, typeof paramDef> { // eslint-
 				throw new ApiError(meta.errors.accessDenied);
 			}
 
-			let imagePng: Buffer | null = null;
-			if (typeof ps.imageBase64 === 'string' && ps.imageBase64.length > 0) {
+			const decodePng = (b64: unknown): Buffer | null => {
+				if (typeof b64 !== 'string' || b64.length === 0) return null;
 				try {
-					const decoded = Buffer.from(ps.imageBase64, 'base64');
+					const decoded = Buffer.from(b64, 'base64');
 					// Sanity-check PNG magic (89 50 4E 47 0D 0A 1A 0A) and cap size at 12MB.
 					if (decoded.length > 8 && decoded.length <= 12 * 1024 * 1024
 						&& decoded[0] === 0x89 && decoded[1] === 0x50 && decoded[2] === 0x4E && decoded[3] === 0x47) {
-						imagePng = decoded;
+						return decoded;
 					}
-				} catch { /* fall back to server render */ }
-			}
-			const updated = await this.chatDrawingService.updateDrawing(me, drawing, ps.strokes, imagePng);
+				} catch { /* fall through */ }
+				return null;
+			};
+			const imagePng = decodePng(ps.imageBase64);
+			const mainPng = decodePng(ps.mainImageBase64);
+			const updated = await this.chatDrawingService.updateDrawing(me, drawing, ps.strokes, imagePng, mainPng);
 			return this.chatEntityService.packDrawing(updated, me);
 		});
 	}

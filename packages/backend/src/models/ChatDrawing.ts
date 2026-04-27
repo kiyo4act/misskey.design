@@ -106,4 +106,15 @@ export class MiChatDrawing {
 
 	@Column('integer', { default: 0 })
 	public imageSize: number;
+
+	// Raster snapshot of the main (fill) layer. Stored as a PNG and rotated on every save
+	// (new key per save) so cached fetches don't serve stale pixels. Lineart and draft
+	// strokes remain in `strokes` as vectors; main is fully rasterised so fill brushes can
+	// produce effects (texture, smudge, pixel-reading) that vector replay can't preserve.
+	@Index({ unique: true })
+	@Column('varchar', { length: 64, nullable: true })
+	public mainImageAccessKey: string | null;
+
+	@Column('integer', { default: 0 })
+	public mainImageSize: number;
 }

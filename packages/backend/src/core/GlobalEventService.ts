@@ -22,6 +22,7 @@ import type { MiSystemWebhook } from '@/models/SystemWebhook.js';
 import type { MiMeta } from '@/models/Meta.js';
 import { MiAvatarDecoration, MiChatMessage, MiChatRoom, MiReversiGame, MiRole, MiRoleAssignment } from '@/models/_.js';
 import type { Packed } from '@/misc/json-schema.js';
+import type { JsonValue } from '@/misc/json-value.js';
 import { DI } from '@/di-symbols.js';
 import type { Config } from '@/config.js';
 import { bindThis } from '@/decorators.js';
@@ -57,7 +58,7 @@ export interface MainEventTypes {
 	pageEvent: {
 		pageId: MiPage['id'];
 		event: string;
-		var: any;
+		var: JsonValue;
 		userId: MiUser['id'];
 		user: Packed<'UserDetailed'>;
 	};
@@ -76,13 +77,13 @@ export interface MainEventTypes {
 		id: MiSignin['id'];
 		createdAt: string;
 		ip: string;
-		headers: Record<string, any>;
+		headers: Record<string, JsonValue>;
 		success: boolean;
 	};
 	registryUpdated: {
 		scope?: string[];
 		key: string;
-		value: any | null;
+		value: JsonValue;
 	};
 	driveFileCreated: Packed<'DriveFile'>;
 	readAntenna: MiAntenna;
@@ -187,6 +188,22 @@ export interface ChatEventTypes {
 			core?: boolean;
 		};
 	};
+	// Raster patch for the main (fill) layer — sent on stroke completion in place of a
+	// vector stroke. Carries a base64 PNG of the dirty rect so peers reproduce the exact
+	// pixels the author rendered, regardless of brush.
+	drawTilePatch: {
+		userId: MiUser['id'];
+		drawingId: string;
+		patch: {
+			id?: string;
+			x: number;
+			y: number;
+			width: number;
+			height: number;
+			dataBase64: string;
+			composite: 'source-over' | 'destination-out' | 'source-atop';
+		};
+	};
 	drawClear: {
 		userId: MiUser['id'];
 		drawingId: string;
@@ -235,7 +252,7 @@ export interface ReversiGameEventTypes {
 	updateSettings: {
 		userId: MiUser['id'];
 		key: string;
-		value: any;
+		value: JsonValue;
 	};
 	log: Reversi.Serializer.Log & { id: string | null };
 	started: {
@@ -374,6 +391,7 @@ export type GlobalEvents = {
 // ストリームごとのEmitterの辞書を用意
 type EventEmitterDictionary = { [x in keyof GlobalEvents]: Emitter.default<EventEmitter, { [y in GlobalEvents[x]['name']]: (e: GlobalEvents[x]['payload']) => void }> };
 // 共用体型を交差型にする型 https://stackoverflow.com/questions/54938141/typescript-convert-union-to-intersection
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the `any` here is load-bearing: it triggers union distribution, which `unknown` does not.
 type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends ((k: infer I) => void) ? I : never;
 // Emitter辞書から共用体型を作り、UnionToIntersectionで交差型にする
 export type StreamEventEmitter = UnionToIntersection<EventEmitterDictionary[keyof GlobalEvents]>;
@@ -394,7 +412,7 @@ export class GlobalEventService {
 	}
 
 	@bindThis
-	private publish(channel: StreamChannels, type: string | null, value?: any): void {
+	private publish(channel: StreamChannels, type: string | null, value?: unknown): void {
 		const message = type == null ? value : value == null ?
 			{ type: type, body: null } :
 			{ type: type, body: value };

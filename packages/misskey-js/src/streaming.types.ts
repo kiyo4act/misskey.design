@@ -264,6 +264,11 @@ export type Channels = {
 				drawingId: string;
 				stroke: ChatDrawStroke;
 			}) => void;
+			drawTilePatch: (payload: {
+				userId: User['id'];
+				drawingId: string;
+				patch: ChatDrawTilePatch;
+			}) => void;
 			drawClear: (payload: {
 				userId: User['id'];
 				drawingId: string;
@@ -299,6 +304,10 @@ export type Channels = {
 			drawStroke: {
 				drawingId: string;
 				stroke: ChatDrawStroke;
+			};
+			drawTilePatch: {
+				drawingId: string;
+				patch: ChatDrawTilePatch;
 			};
 			drawClear: {
 				drawingId: string;
@@ -339,6 +348,11 @@ export type Channels = {
 				drawingId: string;
 				stroke: ChatDrawStroke;
 			}) => void;
+			drawTilePatch: (payload: {
+				userId: User['id'];
+				drawingId: string;
+				patch: ChatDrawTilePatch;
+			}) => void;
 			drawClear: (payload: {
 				userId: User['id'];
 				drawingId: string;
@@ -375,6 +389,10 @@ export type Channels = {
 				drawingId: string;
 				stroke: ChatDrawStroke;
 			};
+			drawTilePatch: {
+				drawingId: string;
+				patch: ChatDrawTilePatch;
+			};
 			drawClear: {
 				drawingId: string;
 			};
@@ -399,9 +417,25 @@ export type ChatDrawStroke = {
 	points: number[][];
 	color: string;
 	width: number;
-	tool: 'pen' | 'eraser' | 'fill' | 'paint';
+	tool: 'pen' | 'eraser' | 'fill' | 'paint' | 'watercolor' | 'text' | 'mixer' | 'airbrush';
 	layer?: 'main' | 'draft' | 'lineart';
 	clip?: boolean;
+	text?: string;
+	hardness?: number;
+	core?: boolean;
+};
+
+// Raster tile patch for the main (fill) layer. Sent on stroke completion in place of
+// a vector stroke; receivers replace the (x, y, width, height) rect with the patch's
+// PNG pixels.
+export type ChatDrawTilePatch = {
+	id?: string;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	dataBase64: string;
+	composite: 'source-over' | 'destination-out' | 'source-atop';
 };
 
 export type NoteUpdatedEvent = { id: Note['id'] } & ({

@@ -22,9 +22,28 @@ export type ChatDrawingStroke = {
 	core?: boolean;
 };
 
+// Raster patch for the main (fill) layer. Sent on stroke completion in place of a
+// vector stroke so any pixel-level brush effect (texture, smudge, mixer) reproduces
+// faithfully on every peer. Receivers decode the PNG, then drawImage at (x, y) using
+// the recorded composite mode.
+export type ChatDrawingTilePatch = {
+	id?: string;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	dataBase64: string;
+	composite: 'source-over' | 'destination-out' | 'source-atop';
+};
+
 export type ChatDrawingLite = Misskey.entities.ChatDrawingLite;
+// The `Misskey.entities.ChatDrawing` autogen lacks our new fields (mainImageUrl /
+// liveTilePatches) until misskey-js is regenerated, so we extend it locally. Once
+// regen catches up, the override here should still be a strict superset.
 export type ChatDrawing = Omit<Misskey.entities.ChatDrawing, 'strokes'> & {
 	strokes: ChatDrawingStroke[];
+	mainImageUrl: string | null;
+	liveTilePatches?: ChatDrawingTilePatch[];
 };
 
 export function apiChatDrawingCreate(params: {
@@ -60,12 +79,14 @@ export function apiChatDrawingUpdate(params: {
 	drawingId: string;
 	strokes: ChatDrawingStroke[];
 	imageBase64?: string;
+	mainImageBase64?: string;
 }): Promise<ChatDrawing> {
 	const body: Record<string, unknown> = {
 		drawingId: params.drawingId,
 		strokes: compactStrokes(params.strokes),
 	};
 	if (params.imageBase64) body.imageBase64 = params.imageBase64;
+	if (params.mainImageBase64) body.mainImageBase64 = params.mainImageBase64;
 	return misskeyApi('chat/drawings/update', body as never) as Promise<ChatDrawing>;
 }
 

@@ -5,7 +5,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { createCanvas, type Canvas } from '@napi-rs/canvas';
+import { createCanvas, loadImage, type Canvas, type Image } from '@napi-rs/canvas';
 import * as Redis from 'ioredis';
 import { DI } from '@/di-symbols.js';
 import { bindThis } from '@/decorators.js';
@@ -31,6 +31,11 @@ const DEFAULT_HEIGHT = 768;
 const LIVE_BUFFER_TTL_SECONDS = 60 * 60 * 24; // 24h
 const LIVE_BUFFER_MAX_LEN = MAX_STROKES;
 const liveBufferKey = (drawingId: string) => `chatDrawingBuf:${drawingId}`;
+// Tile-patch live buffer: PNG patches for the main (raster) layer that haven't been
+// committed via update yet. Capped by count so a flood of fine strokes can't OOM Redis;
+// each patch can be up to ~2MB base64.
+const LIVE_TILE_BUFFER_MAX_LEN = 200;
+const liveTileBufferKey = (drawingId: string) => `chatDrawingTileBuf:${drawingId}`;
 
 const MAX_TITLE_LEN = 256;
 
@@ -107,6 +112,43 @@ function sanitizeStroke(input: unknown): ChatDrawingStroke | null {
 	return { id, points, color, width, tool, layer, clip, text, hardness, core };
 }
 
+// Mirror of the SanitizedDrawTilePatch wire shape, kept local so the service can be
+// used outside the WebSocket layer (e.g., for late-joiner replay).
+export type ChatDrawingTilePatch = {
+	id?: string;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	dataBase64: string;
+	composite: 'source-over' | 'destination-out' | 'source-atop';
+};
+
+const MAX_TILE_PIXEL_DIMENSION = 1024;
+const MAX_TILE_PATCH_BASE64_BYTES = 2 * 1024 * 1024;
+
+function sanitizeTilePatch(input: unknown): ChatDrawingTilePatch | null {
+	if (!input || typeof input !== 'object') return null;
+	const raw = input as Record<string, unknown>;
+	const x = Math.floor(Number(raw.x));
+	const y = Math.floor(Number(raw.y));
+	const width = Math.floor(Number(raw.width));
+	const height = Math.floor(Number(raw.height));
+	if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) return null;
+	if (width <= 0 || height <= 0) return null;
+	if (width > MAX_TILE_PIXEL_DIMENSION || height > MAX_TILE_PIXEL_DIMENSION) return null;
+	if (x < 0 || y < 0) return null;
+	const dataBase64 = typeof raw.dataBase64 === 'string' ? raw.dataBase64 : null;
+	if (!dataBase64) return null;
+	if (dataBase64.length === 0 || dataBase64.length > MAX_TILE_PATCH_BASE64_BYTES) return null;
+	const composite: ChatDrawingTilePatch['composite'] =
+		raw.composite === 'destination-out' ? 'destination-out' :
+		raw.composite === 'source-atop' ? 'source-atop' :
+		'source-over';
+	const id = typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(raw.id) ? raw.id : undefined;
+	return { id, x, y, width, height, dataBase64, composite };
+}
+
 function hexToRgba(hex: string): [number, number, number, number] {
 	const s = hex.replace('#', '');
 	if (s.length === 3) {
@@ -144,10 +186,10 @@ const FILL_DILATE_ITERATIONS = 2;
 // allocated ~6 × 786KB masks → 5MB GC churn per fill. Pooled module-wide; safe because
 // JS is single-threaded within a request and all usages are synchronous.
 const scratchPool: (Uint8Array | null)[] = [null, null, null, null, null];
+
 function getScratch(slot: number, n: number): Uint8Array {
 	let buf = scratchPool[slot];
-	if (!buf || buf.length < n) { buf = new Uint8Array(n); scratchPool[slot] = buf; }
-	else buf.fill(0);
+	if (!buf || buf.length < n) { buf = new Uint8Array(n); scratchPool[slot] = buf; } else buf.fill(0);
 	return buf;
 }
 
@@ -269,8 +311,8 @@ function floodFill(data: Uint8ClampedArray, sample: Uint8ClampedArray, w: number
 
 	const stack: number[] = [sx, sy];
 	while (stack.length > 0) {
-		const y = stack.pop()!;
-		const x = stack.pop()!;
+		const y = stack.pop() as number;
+		const x = stack.pop() as number;
 		let xLeft = x;
 		let idx = y * w + xLeft;
 		while (xLeft >= 0 && passable(idx)) {
@@ -288,14 +330,12 @@ function floodFill(data: Uint8ClampedArray, sample: Uint8ClampedArray, w: number
 			if (y > 0) {
 				const idxUp = idx - w;
 				const matchUp = passable(idxUp);
-				if (!spanAbove && matchUp) { stack.push(xRight, y - 1); spanAbove = true; }
-				else if (spanAbove && !matchUp) spanAbove = false;
+				if (!spanAbove && matchUp) { stack.push(xRight, y - 1); spanAbove = true; } else if (spanAbove && !matchUp) spanAbove = false;
 			}
 			if (y < h - 1) {
 				const idxDown = idx + w;
 				const matchDown = passable(idxDown);
-				if (!spanBelow && matchDown) { stack.push(xRight, y + 1); spanBelow = true; }
-				else if (spanBelow && !matchDown) spanBelow = false;
+				if (!spanBelow && matchDown) { stack.push(xRight, y + 1); spanBelow = true; } else if (spanBelow && !matchDown) spanBelow = false;
 			}
 			xRight++;
 			idx++;
@@ -499,14 +539,14 @@ function renderBrushStrokeServer(
 	};
 	const p0 = stroke.points[0];
 	if (stroke.points.length === 1) {
-		const pr = p0.length >= 3 ? p0[2]! : 1;
+		const pr = p0.length >= 3 ? (p0[2] as number) : 1;
 		drawOne(p0[0] * width, p0[1] * height, p0[0] * width + 0.01, p0[1] * height + 0.01, pr);
 	} else {
 		for (let i = 1; i < stroke.points.length; i++) {
 			const a = stroke.points[i - 1];
 			const b2 = stroke.points[i];
-			const pa = a.length >= 3 ? a[2]! : 1;
-			const pb = b2.length >= 3 ? b2[2]! : 1;
+			const pa = a.length >= 3 ? (a[2] as number) : 1;
+			const pb = b2.length >= 3 ? (b2[2] as number) : 1;
 			const avg = (pa + pb) / 2;
 			drawOne(a[0] * width, a[1] * height, b2[0] * width, b2[1] * height, avg);
 		}
@@ -525,101 +565,113 @@ function renderOneStroke(
 	height: number,
 	layers?: { main: Canvas; draft: Canvas; lineart: Canvas; sample: Canvas },
 ): void {
-		if (stroke.points.length === 0) return;
+	if (stroke.points.length === 0) return;
 
-		if (stroke.tool === 'text') {
-			if (!stroke.text) return;
-			const fontPx = Math.max(4, stroke.width * width);
-			const lineHeight = fontPx * 1.4;
-			const lines = stroke.text.split('\n');
-			const x = stroke.points[0][0] * width;
-			const y = stroke.points[0][1] * height;
-			ctx.save();
-			ctx.font = `${fontPx}px sans-serif`;
-			ctx.textBaseline = 'top';
-			ctx.fillStyle = stroke.color;
-			for (let i = 0; i < lines.length; i++) {
-				ctx.fillText(lines[i], x, y + i * lineHeight);
-			}
-			ctx.restore();
-			return;
-		}
-
-		if (stroke.tool === 'fill') {
-			const [fx, fy] = stroke.points[0];
-			const sx = Math.max(0, Math.min(width - 1, Math.floor(fx * width)));
-			const sy = Math.max(0, Math.min(height - 1, Math.floor(fy * height)));
-			const fillColor = hexToRgba(stroke.color);
-			const imageData = ctx.getImageData(0, 0, width, height);
-			// Fills on main or lineart sample a composite of main + lineart so outlines on
-			// one layer block fills on the other. Fills on draft stay layer-local. The
-			// sample canvas is shared across the whole render pass to avoid per-fill
-			// allocation of a fresh 1024×768 buffer.
-			let sampleData: Uint8ClampedArray = imageData.data;
-			if (layers) {
-				const strokeLayer = stroke.layer === 'draft' ? 'draft' : stroke.layer === 'lineart' ? 'lineart' : 'main';
-				const sampleNames = strokeLayer === 'draft' ? (['draft'] as const) : (['main', 'lineart'] as const);
-				const sampleCtx = layers.sample.getContext('2d');
-				sampleCtx.save();
-				sampleCtx.setTransform(1, 0, 0, 1, 0, 0);
-				sampleCtx.globalCompositeOperation = 'source-over';
-				sampleCtx.globalAlpha = 1;
-				sampleCtx.clearRect(0, 0, width, height);
-				for (const n of sampleNames) sampleCtx.drawImage(layers[n], 0, 0);
-				sampleCtx.restore();
-				sampleData = sampleCtx.getImageData(0, 0, width, height).data;
-			}
-			floodFill(imageData.data, sampleData, width, height, sx, sy, fillColor);
-			ctx.putImageData(imageData, 0, 0);
-			return;
-		}
-
-		if (stroke.tool === 'pen' || stroke.tool === 'paint' || stroke.tool === 'watercolor' || stroke.tool === 'mixer' || stroke.tool === 'airbrush') {
-			renderBrushStrokeServer(ctx, stroke, width, height);
-			return;
-		}
-
-		// Eraser only path — destination-out at full alpha, no bead artefact possible.
+	if (stroke.tool === 'text') {
+		if (!stroke.text) return;
+		const fontPx = Math.max(4, stroke.width * width);
+		const lineHeight = fontPx * 1.4;
+		const lines = stroke.text.split('\n');
+		const x = stroke.points[0][0] * width;
+		const y = stroke.points[0][1] * height;
 		ctx.save();
-		ctx.lineCap = 'round';
-		ctx.lineJoin = 'round';
-		ctx.globalCompositeOperation = 'destination-out';
-		ctx.strokeStyle = '#000';
-		ctx.globalAlpha = 1;
-		const baseWidth = Math.max(1, stroke.width * width);
-		const p0 = stroke.points[0];
-		if (stroke.points.length === 1) {
-			const pr = p0.length >= 3 ? p0[2]! : 1;
-			ctx.lineWidth = Math.max(0.5, baseWidth * pr);
-			ctx.beginPath();
-			ctx.moveTo(p0[0] * width, p0[1] * height);
-			ctx.lineTo(p0[0] * width + 0.01, p0[1] * height + 0.01);
-			ctx.stroke();
-		} else {
-			for (let i = 1; i < stroke.points.length; i++) {
-				const a = stroke.points[i - 1];
-				const b = stroke.points[i];
-				const pa = a.length >= 3 ? a[2]! : 1;
-				const pb = b.length >= 3 ? b[2]! : 1;
-				const avg = (pa + pb) / 2;
-				ctx.lineWidth = Math.max(0.5, baseWidth * avg);
-				ctx.beginPath();
-				ctx.moveTo(a[0] * width, a[1] * height);
-				ctx.lineTo(b[0] * width, b[1] * height);
-				ctx.stroke();
-			}
+		ctx.font = `${fontPx}px sans-serif`;
+		ctx.textBaseline = 'top';
+		ctx.fillStyle = stroke.color;
+		for (let i = 0; i < lines.length; i++) {
+			ctx.fillText(lines[i], x, y + i * lineHeight);
 		}
 		ctx.restore();
+		return;
+	}
+
+	if (stroke.tool === 'fill') {
+		const [fx, fy] = stroke.points[0];
+		const sx = Math.max(0, Math.min(width - 1, Math.floor(fx * width)));
+		const sy = Math.max(0, Math.min(height - 1, Math.floor(fy * height)));
+		const fillColor = hexToRgba(stroke.color);
+		const imageData = ctx.getImageData(0, 0, width, height);
+		// Fills on main or lineart sample a composite of main + lineart so outlines on
+		// one layer block fills on the other. Fills on draft stay layer-local. The
+		// sample canvas is shared across the whole render pass to avoid per-fill
+		// allocation of a fresh 1024×768 buffer.
+		let sampleData: Uint8ClampedArray = imageData.data;
+		if (layers) {
+			const strokeLayer = stroke.layer === 'draft' ? 'draft' : stroke.layer === 'lineart' ? 'lineart' : 'main';
+			const sampleNames = strokeLayer === 'draft' ? (['draft'] as const) : (['main', 'lineart'] as const);
+			const sampleCtx = layers.sample.getContext('2d');
+			sampleCtx.save();
+			sampleCtx.setTransform(1, 0, 0, 1, 0, 0);
+			sampleCtx.globalCompositeOperation = 'source-over';
+			sampleCtx.globalAlpha = 1;
+			sampleCtx.clearRect(0, 0, width, height);
+			for (const n of sampleNames) sampleCtx.drawImage(layers[n], 0, 0);
+			sampleCtx.restore();
+			sampleData = sampleCtx.getImageData(0, 0, width, height).data;
+		}
+		floodFill(imageData.data, sampleData, width, height, sx, sy, fillColor);
+		ctx.putImageData(imageData, 0, 0);
+		return;
+	}
+
+	if (stroke.tool === 'pen' || stroke.tool === 'paint' || stroke.tool === 'watercolor' || stroke.tool === 'mixer' || stroke.tool === 'airbrush') {
+		renderBrushStrokeServer(ctx, stroke, width, height);
+		return;
+	}
+
+	// Eraser only path — destination-out at full alpha, no bead artefact possible.
+	ctx.save();
+	ctx.lineCap = 'round';
+	ctx.lineJoin = 'round';
+	ctx.globalCompositeOperation = 'destination-out';
+	ctx.strokeStyle = '#000';
+	ctx.globalAlpha = 1;
+	const baseWidth = Math.max(1, stroke.width * width);
+	const p0 = stroke.points[0];
+	if (stroke.points.length === 1) {
+		const pr = p0.length >= 3 ? (p0[2] as number) : 1;
+		ctx.lineWidth = Math.max(0.5, baseWidth * pr);
+		ctx.beginPath();
+		ctx.moveTo(p0[0] * width, p0[1] * height);
+		ctx.lineTo(p0[0] * width + 0.01, p0[1] * height + 0.01);
+		ctx.stroke();
+	} else {
+		for (let i = 1; i < stroke.points.length; i++) {
+			const a = stroke.points[i - 1];
+			const b = stroke.points[i];
+			const pa = a.length >= 3 ? (a[2] as number) : 1;
+			const pb = b.length >= 3 ? (b[2] as number) : 1;
+			const avg = (pa + pb) / 2;
+			ctx.lineWidth = Math.max(0.5, baseWidth * avg);
+			ctx.beginPath();
+			ctx.moveTo(a[0] * width, a[1] * height);
+			ctx.lineTo(b[0] * width, b[1] * height);
+			ctx.stroke();
+		}
+	}
+	ctx.restore();
 }
 
-async function renderStrokesToPng(strokes: ChatDrawingStroke[], width: number, height: number): Promise<Buffer> {
-	// Render main and lineart onto separate transparent buffers so per-layer erasers don't
-	// punch through each other, then composite in z-order onto a white canvas. Lineart
-	// sits ALWAYS on top of main (hence its name). The DRAFT layer is intentionally
-	// EXCLUDED from the published PNG — it's a sketch underlay kept in stored stroke data
-	// so authors can continue editing, but it shouldn't be visible in the chat thumbnail
-	// / final image. A fill on main may still sample the draft via the draw-time sample
-	// composite it received, but draft strokes themselves don't appear in the output.
+async function renderStrokesToPng(
+	strokes: ChatDrawingStroke[],
+	width: number,
+	height: number,
+	mainRasterPng?: Buffer | null,
+): Promise<Buffer> {
+	// New layer model: main is a raster bitmap (pre-baked by the client and persisted
+	// independently); lineart and draft remain vector strokes. We start by loading the
+	// main raster (if provided) into the main layer canvas, then replay non-main strokes
+	// over their respective layers.
+	//
+	// Backward compat: if no main raster is provided (legacy drawing whose strokes still
+	// include layer === 'main' entries, or a save from an old client), fall back to the
+	// original behavior of rendering main strokes into the main layer.
+	//
+	// The DRAFT layer is intentionally EXCLUDED from the published PNG — it's a sketch
+	// underlay kept in stored data so authors can continue editing, but it shouldn't be
+	// visible in the chat thumbnail / final image. A fill on main may still sample the
+	// draft via the draw-time sample composite it received, but draft strokes themselves
+	// don't appear in the output.
 	const mainLayer: Canvas = createCanvas(width, height);
 	const draftLayer: Canvas = createCanvas(width, height);
 	const lineartLayer: Canvas = createCanvas(width, height);
@@ -629,8 +681,22 @@ async function renderStrokesToPng(strokes: ChatDrawingStroke[], width: number, h
 	const draftCtx = draftLayer.getContext('2d');
 	const lineartCtx = lineartLayer.getContext('2d');
 
+	let mainRasterApplied = false;
+	if (mainRasterPng && mainRasterPng.length > 0) {
+		try {
+			const img: Image = await loadImage(mainRasterPng);
+			mainCtx.drawImage(img, 0, 0, width, height);
+			mainRasterApplied = true;
+		} catch {
+			// Fall through to stroke-replay path so we don't wedge saves on a bad raster.
+		}
+	}
+
 	const layerHandles = { main: mainLayer, draft: draftLayer, lineart: lineartLayer, sample: sampleLayer };
 	for (const stroke of strokes) {
+		// Skip main-layer strokes when the raster supersedes them. Draft and lineart
+		// remain vector and always replay.
+		if (mainRasterApplied && (stroke.layer === undefined || stroke.layer === 'main')) continue;
 		const targetCtx =
 			stroke.layer === 'draft' ? draftCtx :
 			stroke.layer === 'lineart' ? lineartCtx :
@@ -646,6 +712,31 @@ async function renderStrokesToPng(strokes: ChatDrawingStroke[], width: number, h
 	outCtx.drawImage(lineartLayer, 0, 0);
 
 	return out.encode('png');
+}
+
+// Render only the main layer to a PNG by rendering all main-layer strokes from a
+// (legacy) stroke array. Used for the one-time migration when a drawing has no
+// stored mainImageAccessKey yet but does have main strokes in `strokes[]`.
+async function renderLegacyMainStrokesToPng(strokes: ChatDrawingStroke[], width: number, height: number): Promise<Buffer> {
+	const mainLayer: Canvas = createCanvas(width, height);
+	const draftLayer: Canvas = createCanvas(width, height);
+	const lineartLayer: Canvas = createCanvas(width, height);
+	const sampleLayer: Canvas = createCanvas(width, height);
+	const mainCtx = mainLayer.getContext('2d');
+	const draftCtx = draftLayer.getContext('2d');
+	const lineartCtx = lineartLayer.getContext('2d');
+	const layerHandles = { main: mainLayer, draft: draftLayer, lineart: lineartLayer, sample: sampleLayer };
+	// Replay every stroke (not just main-layer ones) so cross-layer fills sample
+	// the same composite that produced the original main pixels — then keep just the
+	// main layer in the output.
+	for (const stroke of strokes) {
+		const targetCtx =
+			stroke.layer === 'draft' ? draftCtx :
+			stroke.layer === 'lineart' ? lineartCtx :
+			mainCtx;
+		renderOneStroke(targetCtx, stroke, width, height, layerHandles);
+	}
+	return mainLayer.encode('png');
 }
 
 function normalizeUserPair(aId: string, bId: string): { user1Id: string; user2Id: string } {
@@ -713,14 +804,43 @@ export class ChatDrawingService {
 	}
 
 	@bindThis
+	public async appendLiveTilePatch(drawingId: string, patch: ChatDrawingTilePatch): Promise<void> {
+		const clean = sanitizeTilePatch(patch);
+		if (!clean) return;
+		const key = liveTileBufferKey(drawingId);
+		const pipeline = this.redisClient.pipeline();
+		pipeline.rpush(key, JSON.stringify(clean));
+		pipeline.ltrim(key, -LIVE_TILE_BUFFER_MAX_LEN, -1);
+		pipeline.expire(key, LIVE_BUFFER_TTL_SECONDS);
+		await pipeline.exec();
+	}
+
+	@bindThis
+	public async getLiveTilePatches(drawingId: string): Promise<ChatDrawingTilePatch[]> {
+		const raw = await this.redisClient.lrange(liveTileBufferKey(drawingId), 0, -1);
+		const out: ChatDrawingTilePatch[] = [];
+		for (const item of raw) {
+			try {
+				const parsed = JSON.parse(item);
+				const clean = sanitizeTilePatch(parsed);
+				if (clean) out.push(clean);
+			} catch {
+				// skip malformed entry
+			}
+		}
+		return out;
+	}
+
+	@bindThis
 	public async clearLiveStrokes(drawingId: string): Promise<void> {
-		await this.redisClient.del(liveBufferKey(drawingId));
+		await this.redisClient.del(liveBufferKey(drawingId), liveTileBufferKey(drawingId));
 	}
 
 	@bindThis
 	public async clearLiveBufferForClear(drawingId: string): Promise<void> {
 		// called when clients send drawClear over WebSocket — forget buffered strokes
-		await this.redisClient.del(liveBufferKey(drawingId));
+		// AND buffered raster patches
+		await this.redisClient.del(liveBufferKey(drawingId), liveTileBufferKey(drawingId));
 	}
 
 	@bindThis
@@ -780,6 +900,8 @@ export class ChatDrawingService {
 		const cleanTitle = sanitizeTitle(title);
 		const now = new Date();
 		const accessKey = randomBytes(24).toString('hex');
+		// Fresh drawings start empty — no main raster yet. The composite PNG is just
+		// the white canvas + lineart strokes (none on create).
 		const png = await renderStrokesToPng(cleanStrokes, DEFAULT_WIDTH, DEFAULT_HEIGHT);
 		await this.storeDrawingPng(accessKey, png);
 
@@ -798,6 +920,8 @@ export class ChatDrawingService {
 			height: DEFAULT_HEIGHT,
 			imageAccessKey: accessKey,
 			imageSize: png.byteLength,
+			mainImageAccessKey: null,
+			mainImageSize: 0,
 		} satisfies Partial<MiChatDrawing>;
 
 		return await this.chatDrawingsRepository.insertOne(drawing);
@@ -833,6 +957,8 @@ export class ChatDrawingService {
 			height: DEFAULT_HEIGHT,
 			imageAccessKey: accessKey,
 			imageSize: png.byteLength,
+			mainImageAccessKey: null,
+			mainImageSize: 0,
 		} satisfies Partial<MiChatDrawing>;
 
 		return await this.chatDrawingsRepository.insertOne(drawing);
@@ -844,31 +970,70 @@ export class ChatDrawingService {
 		drawing: MiChatDrawing,
 		strokes: unknown,
 		preBakedPng?: Buffer | null,
+		mainRasterPng?: Buffer | null,
 	): Promise<MiChatDrawing> {
-		const cleanStrokes = sanitizeStrokes(strokes);
-		// Prefer the client-baked composite — it's already composited correctly and saves
-		// the heavy stroke replay. The caller validated PNG magic + size before passing.
-		const png = preBakedPng && preBakedPng.length > 0
-			? preBakedPng
-			: await renderStrokesToPng(cleanStrokes, drawing.width || DEFAULT_WIDTH, drawing.height || DEFAULT_HEIGHT);
+		const allClean = sanitizeStrokes(strokes);
+		const width = drawing.width || DEFAULT_WIDTH;
+		const height = drawing.height || DEFAULT_HEIGHT;
 
-		// rotate access key so stale CDN/browser caches don't serve old image
+		// Determine the authoritative main raster for this save:
+		//   1. Client-supplied raster (the new path — every modern client provides this).
+		//   2. Existing raster on the drawing if the client didn't update it.
+		//   3. Legacy fallback: bake main strokes from the strokes array into a PNG,
+		//      so a one-time migration happens on first save of an old drawing.
+		let storedMainPng: Buffer | null = null;
+		if (mainRasterPng && mainRasterPng.length > 0) {
+			storedMainPng = mainRasterPng;
+		} else if (drawing.mainImageAccessKey == null && allClean.some(s => s.layer === undefined || s.layer === 'main')) {
+			storedMainPng = await renderLegacyMainStrokesToPng(allClean, width, height);
+		}
+
+		// Strokes stored in DB are now lineart + draft only; main is the raster. Drop
+		// any main-layer strokes (they've been baked into either the client-supplied
+		// raster or the legacy migration raster above).
+		const persistedStrokes = (storedMainPng != null || drawing.mainImageAccessKey != null)
+			? allClean.filter(s => s.layer === 'draft' || s.layer === 'lineart')
+			: allClean;
+
+		// Composite PNG: prefer the client-baked one. Otherwise we render it now using
+		// the just-decided main raster + lineart strokes.
+		const compositePng = preBakedPng && preBakedPng.length > 0
+			? preBakedPng
+			: await renderStrokesToPng(allClean, width, height, storedMainPng);
+
 		const newAccessKey = randomBytes(24).toString('hex');
-		await this.storeDrawingPng(newAccessKey, png);
+		await this.storeDrawingPng(newAccessKey, compositePng);
+
+		// Rotate the main raster key only when we have new bytes to write — saves a no-op
+		// upload + delete cycle when a save changed only the lineart layer.
+		const oldMainAccessKey = drawing.mainImageAccessKey;
+		let newMainAccessKey: string | null = drawing.mainImageAccessKey;
+		let newMainSize = drawing.mainImageSize;
+		if (storedMainPng != null) {
+			const rotatedKey: string = randomBytes(24).toString('hex');
+			await this.storeDrawingPng(rotatedKey, storedMainPng);
+			newMainAccessKey = rotatedKey;
+			newMainSize = storedMainPng.byteLength;
+		}
 
 		const oldAccessKey = drawing.imageAccessKey;
 
 		const now = new Date();
 		await this.chatDrawingsRepository.update(drawing.id, {
-			strokes: cleanStrokes,
+			strokes: persistedStrokes,
 			updatedAt: now,
 			lastEditedById: editor.id,
 			imageAccessKey: newAccessKey,
-			imageSize: png.byteLength,
+			imageSize: compositePng.byteLength,
+			mainImageAccessKey: newMainAccessKey,
+			mainImageSize: newMainSize,
 		});
 
 		if (oldAccessKey && oldAccessKey !== newAccessKey) {
 			await this.deleteDrawingPng(oldAccessKey);
+		}
+		if (oldMainAccessKey && oldMainAccessKey !== newMainAccessKey) {
+			await this.deleteDrawingPng(oldMainAccessKey);
 		}
 
 		// persisted state is now the authoritative source; forget the live buffer

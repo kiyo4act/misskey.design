@@ -4,6 +4,7 @@
  */
 
 import { Inject, Injectable, Scope } from '@nestjs/common';
+import { REQUEST } from '@nestjs/core';
 import { DI } from '@/di-symbols.js';
 import { bindThis } from '@/decorators.js';
 import { GlobalEventService, type GlobalEvents } from '@/core/GlobalEventService.js';
@@ -11,10 +12,9 @@ import type { JsonObject } from '@/misc/json-value.js';
 import { ChatService } from '@/core/ChatService.js';
 import { ChatDrawingService } from '@/core/ChatDrawingService.js';
 import { UserEntityService } from '@/core/entities/UserEntityService.js';
-import Channel, { type ChannelRequest } from '../channel.js';
-import { REQUEST } from '@nestjs/core';
 import type { ChatRoomsRepository } from '@/models/_.js';
-import { sanitizeDrawStroke } from './chat-draw-utils.js';
+import Channel, { type ChannelRequest } from '../channel.js';
+import { sanitizeDrawStroke, sanitizeDrawTilePatch } from './chat-draw-utils.js';
 
 @Injectable({ scope: Scope.TRANSIENT })
 export class ChatRoomChannel extends Channel {
@@ -64,18 +64,18 @@ export class ChatRoomChannel extends Channel {
 	}
 
 	@bindThis
-	public onMessage(type: string, body: any) {
+	public onMessage(type: string, body: JsonObject) {
 		switch (type) {
 			case 'read':
-				if (this.roomId) {
-					this.chatService.readRoomChatMessage(this.user!.id, this.roomId);
+				if (this.roomId && this.user) {
+					this.chatService.readRoomChatMessage(this.user.id, this.roomId);
 				}
 				break;
 			case 'drawStroke': {
 				if (!this.roomId || !this.user) break;
-				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				const drawingId = typeof body.drawingId === 'string' ? body.drawingId : null;
 				if (!drawingId) break;
-				const stroke = sanitizeDrawStroke(body?.stroke);
+				const stroke = sanitizeDrawStroke(body.stroke);
 				if (!stroke) break;
 				this.chatDrawingService.appendLiveStroke(drawingId, stroke);
 				this.globalEventService.publishChatRoomStream(this.roomId, 'drawStroke', {
@@ -85,9 +85,23 @@ export class ChatRoomChannel extends Channel {
 				});
 				break;
 			}
+			case 'drawTilePatch': {
+				if (!this.roomId || !this.user) break;
+				const drawingId = typeof body.drawingId === 'string' ? body.drawingId : null;
+				if (!drawingId) break;
+				const patch = sanitizeDrawTilePatch(body.patch);
+				if (!patch) break;
+				this.chatDrawingService.appendLiveTilePatch(drawingId, patch);
+				this.globalEventService.publishChatRoomStream(this.roomId, 'drawTilePatch', {
+					userId: this.user.id,
+					drawingId,
+					patch,
+				});
+				break;
+			}
 			case 'drawClear': {
 				if (!this.roomId || !this.user) break;
-				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				const drawingId = typeof body.drawingId === 'string' ? body.drawingId : null;
 				if (!drawingId) break;
 				this.chatDrawingService.clearLiveBufferForClear(drawingId);
 				this.globalEventService.publishChatRoomStream(this.roomId, 'drawClear', {
@@ -98,7 +112,7 @@ export class ChatRoomChannel extends Channel {
 			}
 			case 'drawingPresence': {
 				if (!this.roomId || !this.user) break;
-				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				const drawingId = typeof body.drawingId === 'string' ? body.drawingId : null;
 				if (!drawingId) break;
 				const userId = this.user.id;
 				this.userEntityService.pack(userId).then(user => {
@@ -112,8 +126,8 @@ export class ChatRoomChannel extends Channel {
 			}
 			case 'drawUndo': {
 				if (!this.roomId || !this.user) break;
-				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
-				const strokeId = typeof body?.strokeId === 'string' ? body.strokeId : null;
+				const drawingId = typeof body.drawingId === 'string' ? body.drawingId : null;
+				const strokeId = typeof body.strokeId === 'string' ? body.strokeId : null;
 				if (!drawingId || !strokeId) break;
 				if (!/^[A-Za-z0-9_-]{1,32}$/.test(strokeId)) break;
 				this.chatDrawingService.removeBufferedStrokeById(drawingId, strokeId);
@@ -126,10 +140,10 @@ export class ChatRoomChannel extends Channel {
 			}
 			case 'drawingCursor': {
 				if (!this.roomId || !this.user) break;
-				const drawingId = typeof body?.drawingId === 'string' ? body.drawingId : null;
+				const drawingId = typeof body.drawingId === 'string' ? body.drawingId : null;
 				if (!drawingId) break;
-				const rawX = Number(body?.x);
-				const rawY = Number(body?.y);
+				const rawX = Number(body.x);
+				const rawY = Number(body.y);
 				if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) break;
 				// Clamp to [-0.1, 1.1] — slight overshoot is allowed so the cursor can animate off the edge,
 				// but we reject nonsense values to keep payloads tiny.

@@ -78,8 +78,8 @@ export class FileServerService {
 	}
 
 	@bindThis
-	public createServer(fastify: FastifyInstance, options: FastifyPluginOptions, done: (err?: Error) => void) {
-		fastify.addHook('onRequest', (request, reply, done) => {
+	public createServer(fastify: FastifyInstance, _options: FastifyPluginOptions, done: (err?: Error) => void) {
+		fastify.addHook('onRequest', (_request, reply, done) => {
 			reply.header('Content-Security-Policy', 'default-src \'none\'; img-src \'self\'; media-src \'self\'; style-src \'unsafe-inline\'');
 			if (process.env.NODE_ENV === 'development') {
 				reply.header('Access-Control-Allow-Origin', '*');
@@ -87,9 +87,9 @@ export class FileServerService {
 			done();
 		});
 
-		fastify.register((fastify, options, done) => {
+		fastify.register((fastify, _options, done) => {
 			fastify.addHook('onRequest', handleRequestRedirectToOmitSearch);
-			fastify.get('/files/app-default.jpg', (request, reply) => {
+			fastify.get('/files/app-default.jpg', (_request, reply) => {
 				const file = fs.createReadStream(`${_dirname}/assets/dummy.png`);
 				reply.header('Content-Type', 'image/jpeg');
 				reply.header('Cache-Control', 'max-age=31536000, immutable');
@@ -107,13 +107,18 @@ export class FileServerService {
 			fastify.get<{ Params: { key: string; } }>('/chat-drawings/:key', async (request, reply) => {
 				const keyParam = request.params.key;
 				const accessKey = keyParam.endsWith('.png') ? keyParam.slice(0, -4) : keyParam;
-				const drawing = await this.chatDrawingsRepository.findOneBy({ imageAccessKey: accessKey });
-				if (drawing == null || drawing.imageAccessKey == null) {
+				// Accept either the composite-image key OR the main-raster key. Both live
+				// in the same `chatdrawing-{accessKey}.png` namespace on internal storage,
+				// but they're stored in separate columns on the drawing row — look up either.
+				const drawing = await this.chatDrawingsRepository.findOne({
+					where: [{ imageAccessKey: accessKey }, { mainImageAccessKey: accessKey }],
+				});
+				if (drawing == null) {
 					reply.code(404);
 					return reply.send('Not found');
 				}
 				try {
-					const stream = this.internalStorageService.read(`chatdrawing-${drawing.imageAccessKey}.png`);
+					const stream = this.internalStorageService.read(`chatdrawing-${accessKey}.png`);
 					reply.header('Content-Type', 'image/png');
 					reply.header('Cache-Control', 'public, max-age=31536000, immutable');
 					return reply.send(stream);
@@ -136,7 +141,7 @@ export class FileServerService {
 	}
 
 	@bindThis
-	private async errorHandler(request: FastifyRequest<{ Params?: { [x: string]: any }; Querystring?: { [x: string]: any }; }>, reply: FastifyReply, err?: any) {
+	private async errorHandler(request: FastifyRequest<{ Params?: { [x: string]: unknown }; Querystring?: { [x: string]: unknown }; }>, reply: FastifyReply, err?: unknown) {
 		this.logger.error(`${err}`);
 
 		reply.header('Cache-Control', 'max-age=300');

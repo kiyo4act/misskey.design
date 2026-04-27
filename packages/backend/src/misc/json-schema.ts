@@ -3,6 +3,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- this file defines the JSON-schema
+ * type machinery itself; `any` is used as a load-bearing wildcard for schema-derived
+ * types (union distribution, fallback when a schema is unconstrained). Replacing it
+ * with `unknown` would force every consumer to narrow types they don't need to. */
+
 import {
 	packedMeDetailedOnlySchema,
 	packedMeDetailedSchema,
@@ -70,7 +75,7 @@ import { packedUserWebhookSchema } from '@/models/json-schema/user-webhook.js';
 import { packedSystemWebhookSchema } from '@/models/json-schema/system-webhook.js';
 import { packedAbuseReportNotificationRecipientSchema } from '@/models/json-schema/abuse-report-notification-recipient.js';
 import { packedChatMessageSchema, packedChatMessageLiteSchema, packedChatMessageLiteForRoomSchema, packedChatMessageLiteFor1on1Schema } from '@/models/json-schema/chat-message.js';
-import { packedChatDrawingSchema, packedChatDrawingLiteSchema } from '@/models/json-schema/chat-drawing.js';
+import { packedChatDrawingSchema, packedChatDrawingLiteSchema, packedChatDrawingTilePatchSchema } from '@/models/json-schema/chat-drawing.js';
 import { packedChatRoomSchema } from '@/models/json-schema/chat-room.js';
 import { packedChatRoomInvitationSchema } from '@/models/json-schema/chat-room-invitation.js';
 import { packedChatRoomMembershipSchema } from '@/models/json-schema/chat-room-membership.js';
@@ -150,6 +155,7 @@ export const refs = {
 	ChatRoomMembership: packedChatRoomMembershipSchema,
 	ChatDrawing: packedChatDrawingSchema,
 	ChatDrawingLite: packedChatDrawingLiteSchema,
+	ChatDrawingTilePatch: packedChatDrawingTilePatchSchema,
 };
 
 export type Packed<x extends keyof typeof refs> = SchemaType<typeof refs[x]>;

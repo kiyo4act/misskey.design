@@ -4,9 +4,9 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
+import { In } from 'typeorm';
 import { DI } from '@/di-symbols.js';
 import type { MiUser, ChatMessagesRepository, MiChatMessage, ChatRoomsRepository, MiChatRoom, MiChatRoomInvitation, ChatRoomInvitationsRepository, MiChatRoomMembership, ChatRoomMembershipsRepository, ChatDrawingsRepository } from '@/models/_.js';
-import { awaitAll } from '@/misc/prelude/await-all.js';
 import type { Packed } from '@/misc/json-schema.js';
 import type { } from '@/models/Blocking.js';
 import type { Config } from '@/config.js';
@@ -16,7 +16,6 @@ import { ChatDrawingService } from '@/core/ChatDrawingService.js';
 import type { MiChatDrawing } from '@/models/ChatDrawing.js';
 import { UserEntityService } from './UserEntityService.js';
 import { DriveFileEntityService } from './DriveFileEntityService.js';
-import { In } from 'typeorm';
 
 @Injectable()
 export class ChatEntityService {
@@ -81,7 +80,11 @@ export class ChatEntityService {
 			? null
 			: (drawing.user1Id === me.id ? drawing.user2Id : drawing.user1Id);
 		// Merge persisted + live (unsaved) strokes so late joiners see the current state.
+		// liveTilePatches is the parallel for the main raster: PNG patches from in-flight
+		// strokes that haven't been folded into mainImageUrl yet. Clients draw mainImageUrl
+		// first, then apply the patches in order.
 		const liveStrokes = await this.chatDrawingService.getLiveStrokes(drawing.id);
+		const liveTilePatches = await this.chatDrawingService.getLiveTilePatches(drawing.id);
 		return {
 			id: drawing.id,
 			createdAt: drawing.createdAt.toISOString(),
@@ -94,6 +97,8 @@ export class ChatEntityService {
 			width: drawing.width,
 			height: drawing.height,
 			imageUrl: this.drawingImageUrl(drawing.imageAccessKey),
+			mainImageUrl: this.drawingImageUrl(drawing.mainImageAccessKey),
+			liveTilePatches,
 			strokes: [...drawing.strokes, ...liveStrokes],
 		};
 	}
@@ -213,7 +218,7 @@ export class ChatEntityService {
 			createdAt: this.idService.parse(message.id).date.toISOString(),
 			text: message.text,
 			fromUserId: message.fromUserId,
-			toUserId: message.toUserId!,
+			toUserId: message.toUserId as string,
 			fileId: message.fileId,
 			file: message.fileId ? (packedFiles?.get(message.fileId) ?? await this.driveFileEntityService.pack(message.file ?? message.fileId)) : null,
 			drawingId: message.drawingId,
@@ -268,7 +273,7 @@ export class ChatEntityService {
 			text: message.text,
 			fromUserId: message.fromUserId,
 			fromUser: packedUsers?.get(message.fromUserId) ?? await this.userEntityService.pack(message.fromUser ?? message.fromUserId),
-			toRoomId: message.toRoomId!,
+			toRoomId: message.toRoomId as string,
 			fileId: message.fileId,
 			file: message.fileId ? (packedFiles?.get(message.fileId) ?? await this.driveFileEntityService.pack(message.file ?? message.fileId)) : null,
 			drawingId: message.drawingId,
