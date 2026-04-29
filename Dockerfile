@@ -46,7 +46,7 @@ RUN rm -rf .git/
 
 # build native dependencies for target platform
 
-FROM --platform=$TARGETPLATFORM node:${NODE_VERSION} AS target-builder
+FROM node:${NODE_VERSION} AS target-builder
 
 RUN apt-get update \
 	&& apt-get install -yqq --no-install-recommends \
@@ -69,7 +69,7 @@ RUN node -e "console.log(JSON.parse(require('node:fs').readFileSync('./package.j
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
 	pnpm i --frozen-lockfile --aggregate-output
 
-FROM --platform=$TARGETPLATFORM node:${NODE_VERSION}-slim AS runner
+FROM node:${NODE_VERSION}-slim AS runner
 
 ARG UID="991"
 ARG GID="991"
