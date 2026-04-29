@@ -17,87 +17,41 @@ SPDX-License-Identifier: AGPL-3.0-only
 		<span :class="$style.headerTitle">{{ title || 'お絵かきキャンバス' }}</span>
 	</template>
 
-	<div :class="$style.root" @contextmenu.prevent>
-		<!-- Row 1: tool palette + undo/redo + clear -->
-		<!-- Row 1: 色 / ツール選択 / 履歴 / レイヤー / 全消し -->
-		<div :class="$style.toolbar">
-			<!-- 色 (Color) — leftmost so the swatch is the first thing the eye finds. -->
-			<div :class="$style.toolGroup">
-				<button
-					ref="colorSwatchEl"
-					class="_button"
-					:class="$style.colorSwatch"
-					:style="{ background: composedColor }"
-					:disabled="tool === 'eraser'"
-					title="色を選択"
-					@click="toggleColorPopover"
-				>
-					<span :class="$style.colorSwatchInner" :style="{ background: composedColor }"></span>
-				</button>
-				<div v-if="recentColors.length > 0" :class="$style.recentColors" title="最近使った色">
-					<button
-						v-for="c in recentColors"
-						:key="c"
-						class="_button"
-						:class="$style.recentColorChip"
-						:style="{ background: c }"
-						:disabled="tool === 'eraser'"
-						@click="applyRecentColor(c)"
-					></button>
-				</div>
-			</div>
-
-			<div :class="$style.separator"></div>
-
-			<!-- Drawing tools, sub-grouped:
-			       1. ピグメントを置くブラシ — hard edge → soft edge progression
-			       2. 既存ピクセルを変化させるブラシ — only on main layer
-			       3. 補助ツール — line / fill / eraser / text / spoit
-			     Raster-only buttons stay in the DOM with `invisible` when the active
-			     layer isn't main, so subgroup 3's position never shifts. -->
-			<div :class="$style.toolGroup">
+	<div ref="rootEl" :class="$style.root" @contextmenu.prevent>
+		<!-- Workspace: left tool strip | canvas | right param panel.
+		     Layout follows CLIP STUDIO / SAI / Photoshop conventions: tool selection
+		     on the left, contextual parameter panels on the right, the canvas takes
+		     all remaining space in the middle. The slim bottom bar holds view /
+		     history / destructive controls so the workspace doesn't crowd them. -->
+		<div :class="$style.workspace">
+			<!-- LEFT: vertical tool strip — tools sub-grouped by function. -->
+			<aside :class="$style.toolStrip">
+				<!-- Pigment brushes — hard edge → soft edge progression. -->
 				<button class="_button" :class="[$style.toolButton, tool === 'pen' ? $style.toolActive : null]" title="ペン" @click="tool = 'pen'"><i class="ti ti-pencil"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'marker' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="マーカー (塗りレイヤー専用 / 乗算ブレンド)" @click="tool = 'marker'"><i class="ti ti-highlight"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'watercolor' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="水彩 (塗りレイヤー専用 / 重ね塗りで濃くなる)" @click="tool = 'watercolor'"><i class="ti ti-droplet"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'airbrush' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="エアブラシ (塗りレイヤー専用)" @click="tool = 'airbrush'"><i class="ti ti-spray"></i></button>
 
-				<span :class="[$style.subseparator, !rasterToolsVisible ? $style.invisible : null]"></span>
+				<div :class="[$style.toolStripDivider, !rasterToolsVisible ? $style.invisible : null]"></div>
+
+				<!-- Modifier brushes — only on main layer. -->
 				<button class="_button" :class="[$style.toolButton, tool === 'mixer' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="指先 (塗りレイヤー専用 / 既存ピクセルをぼかす)" @click="tool = 'mixer'"><i class="ti ti-hand-finger"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'dodge' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="覆い焼き (塗りレイヤー専用 / 加算ブレンドで明るくする)" @click="tool = 'dodge'"><i class="ti ti-flare"></i></button>
 
-				<span :class="$style.subseparator"></span>
+				<div :class="$style.toolStripDivider"></div>
 
+				<!-- Helpers — selection, shape, fill, eraser, text, eyedropper. -->
+				<button class="_button" :class="[$style.toolButton, tool === 'lasso' ? $style.toolActive : null]" title="投げ縄選択（全レイヤー貫通・ドラッグで移動 / 角ハンドルで拡縮 / 上ハンドルで回転 / Delete で削除 / Enter で確定 / Esc でキャンセル）" @click="tool = 'lasso'"><i class="ti ti-lasso"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'line' ? $style.toolActive : null]" title="直線" @click="tool = 'line'"><i class="ti ti-line"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'fill' ? $style.toolActive : null, !rasterToolsVisible ? $style.invisible : null]" :disabled="!rasterToolsVisible" title="塗りつぶし (塗りレイヤー専用)" @click="tool = 'fill'"><i class="ti ti-paint"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'eraser' ? $style.toolActive : null]" title="消しゴム" @click="tool = 'eraser'"><i class="ti ti-eraser"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'text' ? $style.toolActive : null]" title="テキスト" @click="tool = 'text'"><i class="ti ti-typography"></i></button>
 				<button class="_button" :class="[$style.toolButton, tool === 'spoit' ? $style.toolActive : null]" title="スポイト (Alt+クリック)" @click="tool = 'spoit'"><i class="ti ti-color-picker"></i></button>
-			</div>
 
-			<div :class="$style.separator"></div>
+				<div :class="$style.toolStripDivider"></div>
 
-			<!-- 履歴 (Edit history) -->
-			<div :class="$style.toolGroup">
-				<button class="_button" :class="$style.toolButton" :disabled="!canUndo" title="元に戻す (Ctrl+Z)" @click="undo"><i class="ti ti-arrow-back-up"></i></button>
-				<button class="_button" :class="$style.toolButton" :disabled="!canRedo" title="やり直し (Ctrl+Y)" @click="redo"><i class="ti ti-arrow-forward-up"></i></button>
-			</div>
-
-			<!-- Spacer pushes the layer cluster to the right edge so the layer toggle's
-			     position stays stable when the left-side tool group expands/contracts
-			     (raster tools showing/hiding shouldn't shift this button around). -->
-			<div :class="$style.spacer"></div>
-
-			<!-- レイヤー (Layer): which layer to draw on / clip routing / draft visibility -->
-			<div :class="$style.toolGroup">
-				<button
-					class="_button"
-					:class="[$style.layerToggle, currentLayer !== 'main' ? $style.toolActive : null]"
-					:title="layerToggleDisabled ? `編集中レイヤー: ${currentLayerLabel}（クリックで切替・ツールは自動でペンに）` : `編集中レイヤー: ${currentLayerLabel}（クリックで切替）`"
-					@click="toggleLayer"
-				>
-					<i class="ti ti-layers-subtract"></i>
-					<span :class="$style.layerToggleLabel">{{ currentLayerLabel }}</span>
-				</button>
+				<!-- Stroke modifiers — clip routing. Restricts pen / 直線 strokes to
+				     pixels that already exist on the named layer (recolour-only). -->
 				<button
 					class="_button"
 					:class="[$style.toolButton, clipMode === 'lineart' ? $style.toolActive : null]"
@@ -114,198 +68,260 @@ SPDX-License-Identifier: AGPL-3.0-only
 				>
 					<i class="ti ti-paint-filled"></i>
 				</button>
-				<label :class="$style.sliderField" title="下描きレイヤーの表示透明度">
-					<span :class="$style.toolLabel">下描き</span>
-					<input v-model.number="draftOpacity" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
-					<span :class="$style.widthValue">{{ Math.round(draftOpacity * 100) }}</span>
-				</label>
+			</aside>
+
+			<!-- CENTER: canvas area. -->
+			<div ref="canvasAreaEl" :class="$style.canvasArea">
+				<div v-if="loading" :class="$style.loadingOverlay"><MkLoading/></div>
+
+				<!-- Participant avatars — overlaid in the top-right so they don't block drawing -->
+				<div v-if="visibleParticipants.length > 0" :class="$style.participantList" title="お絵かきに参加中のユーザー">
+					<div v-for="p in visibleParticipants" :key="p.user.id" :class="$style.participantItem" :title="p.user.username">
+						<MkAvatar :user="p.user" :class="$style.participantAvatar" :link="false" :preview="false"/>
+					</div>
+				</div>
+
+				<div ref="canvasContainerEl" :class="$style.canvasScroll" @wheel="onWheel">
+					<div :class="$style.canvasWrap" :style="canvasWrapStyle">
+						<canvas
+							ref="canvasEl"
+							:class="[
+								$style.canvas,
+								tool === 'hand' ? (panActive ? $style.canvasGrabbingCursor : $style.canvasGrabCursor) :
+								(tool === 'fill' || tool === 'spoit') ? $style.canvasFillCursor :
+								tool === 'text' ? $style.canvasTextCursor :
+								$style.canvasBrushCursor,
+								mirrorView ? $style.canvasMirrored : null,
+							]"
+							:width="CANVAS_W"
+							:height="CANVAS_H"
+							:style="canvasDisplayStyle"
+							@pointerdown="onPointerDown"
+							@pointermove="onCanvasPointerMove"
+							@pointerup="onPointerUp"
+							@pointerenter="onCanvasPointerEnter"
+							@pointerleave="onCanvasPointerLeave"
+							@pointercancel="onPointerUp"
+							@selectstart.prevent
+							@dragstart.prevent
+							@dblclick.prevent
+						></canvas>
+						<textarea
+							v-if="tool === 'text' && textCursor"
+							ref="textBoxEl"
+							v-model="textBoxValue"
+							:class="[$style.textBoxOverlay, textLocked ? $style.textBoxLocked : null]"
+							:style="textBoxStyle"
+							spellcheck="false"
+							@keydown="onTextKeydown"
+							@pointerdown.stop
+						></textarea>
+					</div>
+				</div>
+
+				<!-- Circular brush cursor overlay — positioned against canvasArea so it stays fixed when scrolling -->
+				<div
+					v-show="cursorVisible && tool !== 'fill' && tool !== 'spoit' && tool !== 'text' && tool !== 'hand'"
+					:class="$style.brushCursor"
+					:style="cursorStyle"
+				></div>
+
+				<!-- Rotation handle — only visible while the hand tool is active. Drag the dial
+				     around its centre to rotate the canvas; double-click to reset to 0°. -->
+				<div
+					v-if="tool === 'hand'"
+					:class="$style.rotateHandle"
+					title="ドラッグで回転 / ダブルクリックで0°にリセット"
+					@pointerdown="onRotateHandlePointerDown"
+					@pointermove="onRotateHandlePointerMove"
+					@pointerup="onRotateHandlePointerUp"
+					@pointercancel="onRotateHandlePointerUp"
+					@dblclick.stop.prevent="rotation = 0"
+				>
+					<div :class="$style.rotateHandleDial" :style="{ transform: `rotate(${rotation}deg)` }">
+						<i class="ti ti-arrow-up" :class="$style.rotateHandleArrow"></i>
+					</div>
+					<span :class="$style.rotateHandleLabel">{{ Math.round(rotation) }}°</span>
+				</div>
+
+				<!-- Remote user cursors -->
+				<div
+					v-for="rc in visibleRemoteCursors"
+					:key="rc.userId"
+					:class="$style.remoteCursor"
+					:style="rc.style"
+				>
+					<MkAvatar :user="rc.user" :class="$style.remoteCursorAvatar" :link="false" :preview="false"/>
+					<span :class="$style.remoteCursorName">{{ rc.user.username }}</span>
+				</div>
 			</div>
 
-			<!-- Destructive zone — pulled hard to the top-right corner with a wide
-			     gap before it so the trash button is the most isolated control on
-			     the toolbar. The destructive tint reinforces "this wipes everything". -->
-			<div :class="$style.dangerSpacer"></div>
-			<button class="_button" :class="[$style.toolButton, $style.dangerButton]" title="全消し（取り消せません）" @click="clearAll"><i class="ti ti-trash"></i></button>
+			<!-- RIGHT: stacked parameter panels. Each section is independently
+			     scrollable when the window is short. -->
+			<aside :class="$style.paramPanel">
+				<!-- 色 (Color) — wheel always visible in the panel, plus a swatch
+				     showing the active colour and the recent-colours strip. -->
+				<section :class="$style.panelSection">
+					<h3 :class="$style.panelTitle">色</h3>
+					<canvas
+						ref="wheelCanvasEl"
+						:class="$style.wheelCanvas"
+						:width="WHEEL_SIZE"
+						:height="WHEEL_SIZE"
+						@pointerdown="onWheelPointerDown"
+						@pointermove="onWheelPointerMove"
+						@pointerup="onWheelPointerUp"
+					></canvas>
+					<div :class="$style.wheelSliderRow">
+						<div
+							:class="$style.colorSwatch"
+							:style="{ background: composedColor, cursor: 'default' }"
+							:title="`現在の色: ${composedColor}`"
+						>
+							<span :class="$style.colorSwatchInner" :style="{ background: composedColor }"></span>
+						</div>
+						<span :class="$style.toolLabel" style="width: 10px;">#</span>
+						<input v-model="hexInput" type="text" maxlength="9" :class="$style.hexInput" @change="onHexInputCommit"/>
+					</div>
+					<div v-if="recentColors.length > 0" :class="$style.recentColors" title="最近使った色">
+						<button
+							v-for="c in recentColors"
+							:key="c"
+							class="_button"
+							:class="$style.recentColorChip"
+							:style="{ background: c }"
+							:disabled="tool === 'eraser'"
+							@click="applyRecentColor(c)"
+						></button>
+					</div>
+				</section>
+
+				<!-- ブラシ (Common brush params) -->
+				<section :class="$style.panelSection">
+					<h3 :class="$style.panelTitle">ブラシ</h3>
+					<label :class="[$style.sliderField, $style.sliderFieldStacked]" :title="tool === 'eraser' ? '消しゴムの太さ' : tool === 'text' ? '文字サイズ' : '太さ'">
+						<span :class="$style.toolLabel">{{ tool === 'text' ? 'サイズ' : '太さ' }}</span>
+						<input v-model.number="activeBrushWidth" type="range" min="1" max="60" step="1" :class="$style.widthSlider"/>
+						<span :class="$style.widthValue">{{ activeBrushWidth }}</span>
+					</label>
+					<label :class="[$style.sliderField, $style.sliderFieldStacked]" title="不透明度" :style="tool === 'eraser' ? 'opacity: 0.4;' : ''">
+						<span :class="$style.toolLabel">不透明度</span>
+						<input v-model.number="opacity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider" :disabled="tool === 'eraser'"/>
+						<span :class="$style.widthValue">{{ Math.round(opacity * 100) }}</span>
+					</label>
+					<label :class="[$style.sliderField, $style.sliderFieldStacked]" title="手ぶれ補正">
+						<span :class="$style.toolLabel">手ぶれ補正</span>
+						<input v-model.number="smoothing" type="range" min="0" max="20" step="1" :class="$style.widthSlider"/>
+						<span :class="$style.widthValue">{{ smoothing }}</span>
+					</label>
+					<button
+						class="_button"
+						:class="[$style.panelToggle, pressureSensitivity ? $style.toolActive : null]"
+						:title="pressureSensitivity ? '筆圧検知: ON（クリックで OFF）' : '筆圧検知: OFF（クリックで ON）'"
+						@click="pressureSensitivity = !pressureSensitivity"
+					>
+						<i :class="['ti', pressureSensitivity ? 'ti-writing' : 'ti-writing-off']"></i>
+						<span>筆圧検知{{ pressureSensitivity ? ' ON' : ' OFF' }}</span>
+					</button>
+				</section>
+
+				<!-- ツール固有 — only when the active tool has its own params. -->
+				<section v-if="hasToolParams" :class="$style.panelSection">
+					<h3 :class="$style.panelTitle">{{ toolNameLabel }}</h3>
+					<template v-if="tool === 'airbrush'">
+						<label :class="[$style.sliderField, $style.sliderFieldStacked]" title="エアブラシの硬さ (低=ふわふわ広い / 高=シャープ寄り)">
+							<span :class="$style.toolLabel">硬さ</span>
+							<input v-model.number="airbrushHardness" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
+							<span :class="$style.widthValue">{{ Math.round(airbrushHardness * 100) }}</span>
+						</label>
+						<button class="_button" :class="[$style.panelToggle, airbrushShowCore ? $style.toolActive : null]" title="コア線（エアブラシの芯を表示）" @click="airbrushShowCore = !airbrushShowCore">
+							<i class="ti ti-line"></i>
+							<span>コア線{{ airbrushShowCore ? ' ON' : ' OFF' }}</span>
+						</button>
+					</template>
+					<template v-else-if="tool === 'watercolor'">
+						<label :class="[$style.sliderField, $style.sliderFieldStacked]" title="水彩のにじみ (低=シャープ / 高=ふんわり)">
+							<span :class="$style.toolLabel">にじみ</span>
+							<input v-model.number="watercolorBleed" type="range" min="0" max="2" step="0.05" :class="$style.widthSlider"/>
+							<span :class="$style.widthValue">{{ Math.round(watercolorBleed * 100) }}</span>
+						</label>
+						<label :class="[$style.sliderField, $style.sliderFieldStacked]" title="水彩の濃度 (低=薄塗り重ね / 高=一塗りで濃い)">
+							<span :class="$style.toolLabel">濃度</span>
+							<input v-model.number="watercolorDensity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider"/>
+							<span :class="$style.widthValue">{{ Math.round(watercolorDensity * 100) }}</span>
+						</label>
+					</template>
+					<template v-else-if="tool === 'marker'">
+						<label :class="[$style.sliderField, $style.sliderFieldStacked]" title="マーカーの濃さ (乗算ブレンド時の不透明度)">
+							<span :class="$style.toolLabel">濃さ</span>
+							<input v-model.number="markerIntensity" type="range" min="0.1" max="1" step="0.05" :class="$style.widthSlider"/>
+							<span :class="$style.widthValue">{{ Math.round(markerIntensity * 100) }}</span>
+						</label>
+					</template>
+					<template v-else-if="tool === 'mixer'">
+						<label :class="[$style.sliderField, $style.sliderFieldStacked]" title="指先の強さ (低=じわっと / 高=一気にぼかす)">
+							<span :class="$style.toolLabel">強さ</span>
+							<input v-model.number="mixerStrength" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider"/>
+							<span :class="$style.widthValue">{{ Math.round(mixerStrength * 100) }}</span>
+						</label>
+					</template>
+					<template v-else-if="tool === 'dodge'">
+						<label :class="[$style.sliderField, $style.sliderFieldStacked]" title="覆い焼きの強さ (低=ほんのり / 高=一気に明るく)">
+							<span :class="$style.toolLabel">強さ</span>
+							<input v-model.number="dodgeIntensity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider"/>
+							<span :class="$style.widthValue">{{ Math.round(dodgeIntensity * 100) }}</span>
+						</label>
+					</template>
+				</section>
+
+				<!-- レイヤー (Layer) — show all 3 layers as a stacked list (Photoshop /
+				     CLIP STUDIO style). Active row is highlighted with the accent
+				     colour AND a leading bar so it's unambiguous which layer
+				     receives the next stroke. -->
+				<section :class="$style.panelSection">
+					<h3 :class="$style.panelTitle">レイヤー</h3>
+					<div :class="$style.layerList">
+						<button
+							v-for="opt in layerOptions"
+							:key="opt.value"
+							class="_button"
+							:class="[$style.layerRow, currentLayer === opt.value ? $style.layerRowActive : null]"
+							:disabled="layerToggleDisabled && opt.value !== 'main'"
+							:title="layerToggleDisabled && opt.value !== 'main' ? '選択中のツールは塗りレイヤー専用' : `${opt.label}レイヤーに切替`"
+							@click="currentLayer = opt.value"
+						>
+							<span :class="$style.layerRowMarker"></span>
+							<i :class="['ti', opt.icon, $style.layerRowIcon]"></i>
+							<span :class="$style.layerRowLabel">{{ opt.label }}</span>
+							<i v-if="currentLayer === opt.value" class="ti ti-check" :class="$style.layerRowCheck"></i>
+						</button>
+					</div>
+					<label :class="[$style.sliderField, $style.sliderFieldStacked]" title="下描きレイヤーの表示透明度">
+						<span :class="$style.toolLabel">下描き透明度</span>
+						<input v-model.number="draftOpacity" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
+						<span :class="$style.widthValue">{{ Math.round(draftOpacity * 100) }}</span>
+					</label>
+				</section>
+			</aside>
 		</div>
 
-		<!-- Row 2: 共通ブラシ params / ツール固有 / 表示 -->
-		<div :class="[$style.toolbar, $style.toolbarSecondary]">
-			<!-- 共通ブラシ (Common brush params) — apply across all stroke tools -->
+		<!-- BOTTOM bar: history / view / clear. Slim status-bar style. -->
+		<div :class="$style.bottomBar">
 			<div :class="$style.toolGroup">
-				<label :class="$style.sliderField" :title="tool === 'eraser' ? '消しゴムの太さ' : tool === 'text' ? '文字サイズ' : '太さ'">
-					<span :class="$style.toolLabel">{{ tool === 'text' ? 'サイズ' : '太さ' }}</span>
-					<input v-model.number="activeBrushWidth" type="range" min="1" max="60" step="1" :class="$style.widthSlider"/>
-					<span :class="$style.widthValue">{{ activeBrushWidth }}</span>
-				</label>
-
-				<label :class="$style.sliderField" title="不透明度" :style="tool === 'eraser' ? 'opacity: 0.4;' : ''">
-					<span :class="$style.toolLabel">不透明度</span>
-					<input v-model.number="opacity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider" :disabled="tool === 'eraser'"/>
-					<span :class="$style.widthValue">{{ Math.round(opacity * 100) }}</span>
-				</label>
-
-				<label :class="$style.sliderField" title="手ぶれ補正">
-					<span :class="$style.toolLabel">手ぶれ補正</span>
-					<input v-model.number="smoothing" type="range" min="0" max="20" step="1" :class="$style.widthSlider"/>
-					<span :class="$style.widthValue">{{ smoothing }}</span>
-				</label>
-
-				<button
-					class="_button"
-					:class="[$style.toolButton, pressureSensitivity ? $style.toolActive : null]"
-					:title="pressureSensitivity ? '筆圧検知: ON（クリックで OFF）' : '筆圧検知: OFF（クリックで ON）'"
-					@click="pressureSensitivity = !pressureSensitivity"
-				>
-					<i :class="['ti', pressureSensitivity ? 'ti-writing' : 'ti-writing-off']"></i>
-				</button>
+				<button class="_button" :class="$style.toolButton" :disabled="!canUndo" title="元に戻す (Ctrl+Z)" @click="undo"><i class="ti ti-arrow-back-up"></i></button>
+				<button class="_button" :class="$style.toolButton" :disabled="!canRedo" title="やり直し (Ctrl+Y)" @click="redo"><i class="ti ti-arrow-forward-up"></i></button>
 			</div>
-
-			<!-- ツール固有 (Tool-specific params) — only the selected tool's controls,
-			     wrapped in a tinted zone so users can tell at a glance these change
-			     when the active tool changes. -->
-			<div v-if="hasToolParams" :class="$style.toolParams">
-				<template v-if="tool === 'airbrush'">
-					<label :class="$style.sliderField" title="エアブラシの硬さ (低=ふわふわ広い / 高=シャープ寄り)">
-						<span :class="$style.toolLabel">硬さ</span>
-						<input v-model.number="airbrushHardness" type="range" min="0" max="1" step="0.05" :class="$style.widthSlider"/>
-						<span :class="$style.widthValue">{{ Math.round(airbrushHardness * 100) }}</span>
-					</label>
-					<button class="_button" :class="[$style.toolButton, airbrushShowCore ? $style.toolActive : null]" title="コア線（エアブラシの芯を表示）" @click="airbrushShowCore = !airbrushShowCore"><i class="ti ti-line"></i></button>
-				</template>
-
-				<template v-else-if="tool === 'watercolor'">
-					<label :class="$style.sliderField" title="水彩のにじみ (低=シャープ / 高=ふんわり)">
-						<span :class="$style.toolLabel">にじみ</span>
-						<input v-model.number="watercolorBleed" type="range" min="0" max="2" step="0.05" :class="$style.widthSlider"/>
-						<span :class="$style.widthValue">{{ Math.round(watercolorBleed * 100) }}</span>
-					</label>
-					<label :class="$style.sliderField" title="水彩の濃度 (低=薄塗り重ね / 高=一塗りで濃い)">
-						<span :class="$style.toolLabel">濃度</span>
-						<input v-model.number="watercolorDensity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider"/>
-						<span :class="$style.widthValue">{{ Math.round(watercolorDensity * 100) }}</span>
-					</label>
-				</template>
-
-				<template v-else-if="tool === 'marker'">
-					<label :class="$style.sliderField" title="マーカーの濃さ (乗算ブレンド時の不透明度)">
-						<span :class="$style.toolLabel">濃さ</span>
-						<input v-model.number="markerIntensity" type="range" min="0.1" max="1" step="0.05" :class="$style.widthSlider"/>
-						<span :class="$style.widthValue">{{ Math.round(markerIntensity * 100) }}</span>
-					</label>
-				</template>
-
-				<template v-else-if="tool === 'mixer'">
-					<label :class="$style.sliderField" title="指先の強さ (低=じわっと / 高=一気にぼかす)">
-						<span :class="$style.toolLabel">強さ</span>
-						<input v-model.number="mixerStrength" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider"/>
-						<span :class="$style.widthValue">{{ Math.round(mixerStrength * 100) }}</span>
-					</label>
-				</template>
-
-				<template v-else-if="tool === 'dodge'">
-					<label :class="$style.sliderField" title="覆い焼きの強さ (低=ほんのり / 高=一気に明るく)">
-						<span :class="$style.toolLabel">強さ</span>
-						<input v-model.number="dodgeIntensity" type="range" min="0.05" max="1" step="0.05" :class="$style.widthSlider"/>
-						<span :class="$style.widthValue">{{ Math.round(dodgeIntensity * 100) }}</span>
-					</label>
-				</template>
-			</div>
-
-			<div :class="$style.spacer"></div>
-
-			<!-- 表示 (View) — rotate-reset / hand / zoom-reset / flip. Zoom in/out
-			     buttons removed (Ctrl+wheel and the hand tool cover that). Rotate
-			     reset sits left of the hand tool so it's reachable while panning. -->
+			<div :class="$style.separator"></div>
 			<div :class="$style.toolGroup">
 				<button class="_button" :class="$style.toolButton" :disabled="rotation === 0" title="回転リセット" @click="rotation = 0"><i class="ti ti-rotate-clockwise"></i></button>
-				<button class="_button" :class="[$style.toolButton, tool === 'hand' ? $style.toolActive : null]" title="手のひら (ドラッグ移動 / Shift+ドラッグ回転 / ホイールでズーム)" @click="tool = 'hand'"><i class="ti ti-hand-stop"></i></button>
+				<button class="_button" :class="[$style.toolButton, tool === 'hand' ? $style.toolActive : null]" title="手のひら (ドラッグ=移動 / 2本指=ピンチでズーム&回転 / Shift+ドラッグ=回転)" @click="tool = 'hand'"><i class="ti ti-hand-stop"></i></button>
+				<button class="_button" :class="$style.toolButton" :disabled="zoom <= MIN_ZOOM" title="ズームアウト" @click="zoomStep(1 / 1.25)"><i class="ti ti-zoom-out"></i></button>
 				<button class="_button" :class="[$style.toolButton, $style.zoomLabel]" title="表示をリセット (100% / 中央 / 回転0°)" @click="zoomReset">{{ Math.round(zoom * 100) }}%</button>
+				<button class="_button" :class="$style.toolButton" :disabled="zoom >= MAX_ZOOM" title="ズームイン" @click="zoomStep(1.25)"><i class="ti ti-zoom-in"></i></button>
 				<button class="_button" :class="[$style.toolButton, mirrorView ? $style.toolActive : null]" title="左右反転ビュー（表示のみ）" @click="mirrorView = !mirrorView"><i class="ti ti-flip-horizontal"></i></button>
 			</div>
-		</div>
-
-		<!-- Color wheel popover -->
-		<div v-if="colorPopoverOpen" :class="$style.colorPopover" :style="colorPopoverStyle" @click.stop @mousedown.stop>
-			<canvas
-				ref="wheelCanvasEl"
-				:class="$style.wheelCanvas"
-				:width="WHEEL_SIZE"
-				:height="WHEEL_SIZE"
-				@pointerdown="onWheelPointerDown"
-				@pointermove="onWheelPointerMove"
-				@pointerup="onWheelPointerUp"
-			></canvas>
-			<div :class="$style.wheelSliderRow">
-				<span :class="$style.toolLabel" style="width: 14px;">#</span>
-				<input v-model="hexInput" type="text" maxlength="9" :class="$style.hexInput" @change="onHexInputCommit"/>
-			</div>
-		</div>
-
-		<div ref="canvasAreaEl" :class="$style.canvasArea">
-			<div v-if="loading" :class="$style.loadingOverlay"><MkLoading/></div>
-
-			<!-- Participant avatars — overlaid in the top-right so they don't block drawing -->
-			<div v-if="visibleParticipants.length > 0" :class="$style.participantList" title="お絵かきに参加中のユーザー">
-				<div v-for="p in visibleParticipants" :key="p.user.id" :class="$style.participantItem" :title="p.user.username">
-					<MkAvatar :user="p.user" :class="$style.participantAvatar" :link="false" :preview="false"/>
-				</div>
-			</div>
-
-			<div ref="canvasContainerEl" :class="$style.canvasScroll" @wheel="onWheel">
-				<div :class="$style.canvasWrap" :style="canvasWrapStyle">
-					<canvas
-						ref="canvasEl"
-						:class="[
-							$style.canvas,
-							tool === 'hand' ? (panActive ? $style.canvasGrabbingCursor : $style.canvasGrabCursor) :
-							(tool === 'fill' || tool === 'spoit') ? $style.canvasFillCursor :
-							tool === 'text' ? $style.canvasTextCursor :
-							$style.canvasBrushCursor,
-							mirrorView ? $style.canvasMirrored : null,
-						]"
-						:width="CANVAS_W"
-						:height="CANVAS_H"
-						:style="canvasDisplayStyle"
-						@pointerdown="onPointerDown"
-						@pointermove="onCanvasPointerMove"
-						@pointerup="onPointerUp"
-						@pointerenter="onCanvasPointerEnter"
-						@pointerleave="onCanvasPointerLeave"
-						@pointercancel="onPointerUp"
-						@selectstart.prevent
-						@dragstart.prevent
-						@dblclick.prevent
-					></canvas>
-					<textarea
-						v-if="tool === 'text' && textCursor"
-						ref="textBoxEl"
-						v-model="textBoxValue"
-						:class="[$style.textBoxOverlay, textLocked ? $style.textBoxLocked : null]"
-						:style="textBoxStyle"
-						spellcheck="false"
-						@keydown="onTextKeydown"
-						@pointerdown.stop
-					></textarea>
-				</div>
-			</div>
-
-			<!-- Circular brush cursor overlay — positioned against canvasArea so it stays fixed when scrolling -->
-			<div
-				v-show="cursorVisible && tool !== 'fill' && tool !== 'spoit' && tool !== 'text' && tool !== 'hand'"
-				:class="$style.brushCursor"
-				:style="cursorStyle"
-			></div>
-
-			<!-- Remote user cursors -->
-			<div
-				v-for="rc in visibleRemoteCursors"
-				:key="rc.userId"
-				:class="$style.remoteCursor"
-				:style="rc.style"
-			>
-				<MkAvatar :user="rc.user" :class="$style.remoteCursorAvatar" :link="false" :preview="false"/>
-				<span :class="$style.remoteCursorName">{{ rc.user.username }}</span>
-			</div>
+			<div :class="$style.spacer"></div>
+			<button class="_button" :class="[$style.toolButton, $style.dangerButton]" title="全消し（取り消せません）" @click="clearAll"><i class="ti ti-trash"></i></button>
 		</div>
 
 		<div :class="$style.footer">
@@ -358,6 +374,7 @@ const CANVAS_W = 1024;
 const CANVAS_H = 768;
 
 const windowEl = useTemplateRef('windowEl');
+const rootEl = useTemplateRef('rootEl');
 const canvasEl = useTemplateRef('canvasEl');
 const canvasContainerEl = useTemplateRef('canvasContainerEl');
 const canvasAreaEl = useTemplateRef('canvasAreaEl');
@@ -371,7 +388,11 @@ const cursorStyle = ref<{ left: string; top: string; width: string; height: stri
 // Tool union, including raster-only brushes that always paint to the main raster
 // layer (watercolor / marker / mixer / dodge). These are rendered live to mainCanvas
 // and broadcast as raster tile patches; their strokes never enter `strokes[]`.
-const tool = ref<'pen' | 'eraser' | 'fill' | 'line' | 'spoit' | 'text' | 'hand' | 'airbrush' | 'watercolor' | 'marker' | 'mixer' | 'dodge'>('pen');
+//
+// `lasso` is a layer-spanning selection tool — it captures pixels from main and
+// splits/lifts vector strokes from lineart/draft, then exposes scale/rotate/move
+// handles on the floating selection.
+const tool = ref<'pen' | 'eraser' | 'fill' | 'line' | 'spoit' | 'text' | 'hand' | 'airbrush' | 'watercolor' | 'marker' | 'mixer' | 'dodge' | 'lasso'>('pen');
 
 // Airbrush adjustables. Hardness 0..1 maps to shadow blur ratio (low = wide & soft, high
 // = tight & sharp). Core toggles whether the source line is visible — off (default) renders
@@ -501,6 +522,17 @@ watch(tool, (newT: string, oldT: string) => {
 		textLocked.value = false;
 		textCursor.value = null;
 	}
+	// Leaving the lasso tool while a selection is floating — auto-commit it
+	// so the user doesn't end up with a stuck floating selection they can't
+	// finish. If they were just drawing the polygon, drop the in-progress
+	// polygon entirely.
+	if (oldT === 'lasso' && newT !== 'lasso') {
+		if (lassoSelection.value) commitLassoSelection();
+		if (lassoDrawingPolygon.value) {
+			lassoDrawingPolygon.value = null;
+			recompositeDisplay();
+		}
+	}
 	// Main-only tools (fill / airbrush) always paint to main; surface that in the UI by
 	// flipping the active layer over so the layer label and any layer-aware controls
 	// (eraser preview, clip mode visibility) match where the next stroke will land.
@@ -517,7 +549,7 @@ const MAX_ZOOM = 8;
 const opacity = ref<number>(1);
 // 0 = no smoothing. Higher = more latency, smoother curves. The pointer moves averaged over
 // the last N samples; we trail by (smoothing) samples, then flush the rest on pointerup.
-const smoothing = ref<number>(0);
+const smoothing = ref<number>(2);
 const mirrorView = ref<boolean>(false);
 
 // Layer-separated offscreen canvases. Strokes are drawn to the corresponding offscreen
@@ -644,8 +676,6 @@ const hsvH = ref<number>(0.539);
 const hsvS = ref<number>(0.754);
 const hsvV = ref<number>(0.671);
 const hexInput = ref<string>('#2a8dabff');
-const colorPopoverOpen = ref<boolean>(false);
-const colorSwatchEl = useTemplateRef('colorSwatchEl');
 const wheelCanvasEl = useTemplateRef('wheelCanvasEl');
 const WHEEL_SIZE = 200;
 // Geometry for the hue-ring + SV-square picker.
@@ -654,7 +684,6 @@ const WHEEL_RING_INNER = WHEEL_SIZE / 2 - 26; // inner radius of the hue ring (r
 // Inscribed square inside the inner circle. side = inner_radius * √2, but shrink a hair
 // so the square doesn't visually touch the ring.
 const WHEEL_SQUARE_SIDE = Math.floor((WHEEL_RING_INNER - 4) * Math.SQRT2);
-const colorPopoverStyle = ref<{ top: string; left: string }>({ top: '0px', left: '0px' });
 
 function hexToRgb(hex: string): [number, number, number] {
 	const s = hex.replace('#', '');
@@ -815,12 +844,10 @@ function drawWheel() {
 	drawMarker(svX, svY, 5);
 }
 
-// Repaint the wheel when V changes or when the popover opens (canvas starts blank).
-watch([hsvV, hsvH, hsvS, colorPopoverOpen], () => {
-	if (colorPopoverOpen.value) {
-		// Wait a tick so the canvas is actually mounted when we draw.
-		requestAnimationFrame(drawWheel);
-	}
+// Repaint the wheel whenever H/S/V changes. The wheel is now always mounted
+// in the right panel, so we don't need a popover-open gate any more.
+watch([hsvV, hsvH, hsvS], () => {
+	requestAnimationFrame(drawWheel);
 });
 
 // Pointer dragging on the picker is locked into one of two modes from the initial press.
@@ -888,35 +915,6 @@ function onWheelPointerUp(ev: PointerEvent) {
 	if (!wheelDragMode) return;
 	wheelDragMode = null;
 	try { wheelCanvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
-}
-
-function toggleColorPopover() {
-	if (colorPopoverOpen.value) {
-		colorPopoverOpen.value = false;
-		return;
-	}
-	const btn = colorSwatchEl.value as unknown as HTMLElement | null;
-	if (btn) {
-		const rect = btn.getBoundingClientRect();
-		colorPopoverStyle.value = {
-			top: `${rect.bottom + 4}px`,
-			left: `${Math.min(rect.left, window.innerWidth - 240)}px`,
-		};
-	}
-	colorPopoverOpen.value = true;
-	// Initialize HSV state from the current color
-	const [h, s, v] = rgbToHsv(...hexToRgb(color.value));
-	hsvH.value = h; hsvS.value = s; hsvV.value = v;
-	hexInput.value = composedColor.value;
-}
-
-function closeColorPopoverOnOutside(ev: MouseEvent) {
-	if (!colorPopoverOpen.value) return;
-	const target = ev.target as Node;
-	const btn = colorSwatchEl.value as unknown as HTMLElement | null;
-	if (btn && btn.contains(target)) return;
-	// Any click outside the wheel closes it (the popover itself stops propagation via @click.stop)
-	colorPopoverOpen.value = false;
 }
 
 const strokes = ref<ChatDrawingStroke[]>([]);
@@ -1244,6 +1242,95 @@ let pendingRefetchDrawingId: string | null = null;
 let currentPoints: [number, number, number][] = [];
 // rawBuffer: recent raw pointer samples used to compute the moving-average "smoothed" head
 let rawBuffer: [number, number, number][] = [];
+// ストローク開始からの累積パス長 (canvas 内座標, px)。pen 入りの taper を
+// 「最初の TAPER_IN_LEN px」のあいだ徐々にランプアップさせるために使用。
+// 窓 MA に合成 0 を混ぜる旧方式は、0 が窓から落ちるタイミング (= サンプル数
+// が窓長を超えた瞬間) で平均が離散的にジャンプして「描き始めから急に太くなる」
+// 段差を生んでいた。距離ベースの taper はサンプルレートに依存せず連続。
+let strokePathLength = 0;
+// 筆圧専用の固定窓移動平均。ペンタブの生筆圧は高周波ノイズが乗っているため、
+// そのまま線幅に使うとドット単位で太さがガタつく。EMA だと一度入った突発値が
+// 長く尾を引くので、ここでは固定長 N サンプルの算術平均にして、突発ノイズの
+// 寄与を 1/N に固定する (= より一貫した滑らかさ)。
+// 位置スタビライザ (smoothing スライダ) とは独立。窓長は短すぎると効かず、
+// 長すぎると遅延が目立つので 8 サンプル前後 (≈ 60–70ms@120Hz) に置く。
+const PRESSURE_WINDOW_SIZE = 8;
+let pressureWindow: number[] = [];
+let pressureWindowSum = 0;
+
+function resetPressureSmoothing() {
+	pressureWindow = [];
+	pressureWindowSum = 0;
+}
+
+function pushPressureSample(p: number) {
+	pressureWindow.push(p);
+	pressureWindowSum += p;
+	if (pressureWindow.length > PRESSURE_WINDOW_SIZE) {
+		pressureWindowSum -= pressureWindow.shift() as number;
+	}
+}
+
+function currentSmoothedPressure(): number {
+	return pressureWindow.length > 0 ? pressureWindowSum / pressureWindow.length : 0;
+}
+
+// 終端速度計算用の最近サンプル (canvas 座標 + timestamp)。pointerdown でリセット、
+// 各ポインタサンプル毎に push、pointerup で末尾→先頭の総距離 / 経過時間から
+// px/sec を求める。これで「払い」(harai) の長さを終端の勢いで決められる。
+type RecentSample = { x: number; y: number; t: number };
+const RECENT_SAMPLES_MAX = 6;
+let recentSamples: RecentSample[] = [];
+
+function resetRecentSamples() {
+	recentSamples = [];
+}
+
+function pushRecentSample(nx: number, ny: number) {
+	recentSamples.push({ x: nx * CANVAS_W, y: ny * CANVAS_H, t: performance.now() });
+	if (recentSamples.length > RECENT_SAMPLES_MAX) {
+		recentSamples.shift();
+	}
+}
+
+function computeEndVelocity(): number {
+	if (recentSamples.length < 2) return 0;
+	const first = recentSamples[0];
+	const last = recentSamples[recentSamples.length - 1];
+	const dt = (last.t - first.t) / 1000;
+	if (dt <= 0) return 0;
+	let totalDist = 0;
+	for (let i = 1; i < recentSamples.length; i++) {
+		const prev = recentSamples[i - 1];
+		const curr = recentSamples[i];
+		totalDist += Math.sqrt((curr.x - prev.x) ** 2 + (curr.y - prev.y) ** 2);
+	}
+	return totalDist / dt;
+}
+
+// 終端からの累積パス長 < taperLen の点の筆圧を線形に 0 までスケールする。
+// 末尾を細く払う「習字の払い」効果。長さは終端速度から決まるので、勢いよく
+// 描き終えた線ほど長く細くなる。
+function applyHaraiTaper(points: [number, number, number][], taperLen: number) {
+	if (points.length < 2 || taperLen <= 0) return;
+	const lengthsFromEnd: number[] = new Array(points.length);
+	lengthsFromEnd[points.length - 1] = 0;
+	for (let i = points.length - 2; i >= 0; i--) {
+		const dx = (points[i + 1][0] - points[i][0]) * CANVAS_W;
+		const dy = (points[i + 1][1] - points[i][1]) * CANVAS_H;
+		lengthsFromEnd[i] = lengthsFromEnd[i + 1] + Math.sqrt(dx * dx + dy * dy);
+	}
+	for (let i = 0; i < points.length; i++) {
+		const dist = lengthsFromEnd[i];
+		if (dist < taperLen) {
+			// smoothstep で 0 → 1 (= 細く → 太く向きで 0 が末尾)
+			const u = dist / taperLen;
+			const f = u * u * (3 - 2 * u);
+			points[i] = [points[i][0], points[i][1], points[i][2] * f];
+		}
+	}
+}
+
 // Line tool working state. The preview wipe-to-pre-state uses preStrokeLayerSnapshot
 // (grabbed at onPointerDown) — no separate snapshot is needed.
 let lineStart: [number, number, number] | null = null;
@@ -1387,6 +1474,111 @@ function recompositeDisplay() {
 	c.drawImage(mainCanvas, 0, 0);
 	// Lineart layer always sits on top of main so colour fills never obscure line work.
 	c.drawImage(lineartCanvas, 0, 0);
+
+	// Lasso overlay — drawn last so it stays above all painted content.
+	drawLassoOverlay(c);
+
+	c.restore();
+}
+
+// Render the in-progress polygon, the floating selection preview, the
+// bounding box and the transform handles. Drawn into the same display canvas
+// (`canvasEl`) used for the layer composite, so it inherits the view rotation.
+function drawLassoOverlay(c: CanvasRenderingContext2D) {
+	const drawing = lassoDrawingPolygon.value;
+	if (drawing && drawing.length >= 2) {
+		c.save();
+		c.lineWidth = 1.5;
+		c.setLineDash([6, 4]);
+		c.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+		c.beginPath();
+		c.moveTo(drawing[0][0], drawing[0][1]);
+		for (let i = 1; i < drawing.length; i++) c.lineTo(drawing[i][0], drawing[i][1]);
+		c.stroke();
+		c.restore();
+	}
+
+	const sel = lassoSelection.value;
+	if (!sel) return;
+	const cx = sel.bboxX + sel.bboxW / 2;
+	const cy = sel.bboxY + sel.bboxH / 2;
+	const halfW = sel.bboxW / 2;
+	const halfH = sel.bboxH / 2;
+
+	c.save();
+	// Apply the floating selection's transform to everything we draw below.
+	c.translate(cx + sel.tx, cy + sel.ty);
+	c.rotate(sel.rotation);
+	c.scale(sel.scale, sel.scale);
+
+	// Floating raster preview on top of the (already-cut) main layer.
+	if (sel.rasterCanvas) c.drawImage(sel.rasterCanvas, -halfW, -halfH);
+
+	// Floating vector strokes — rendered to per-layer offscreen canvases so we
+	// can apply the same `draftOpacity` to draft strokes that recompositeDisplay
+	// applies to the live draft layer. Without this split, draft strokes lifted
+	// into the lasso would render at full alpha during the move, losing the
+	// see-through guide-layer feel users set up with the draft slider.
+	if (sel.vectorStrokes.length > 0) {
+		const draftOverlay = globalThis.document.createElement('canvas');
+		const lineartOverlay = globalThis.document.createElement('canvas');
+		draftOverlay.width = lineartOverlay.width = CANVAS_W;
+		draftOverlay.height = lineartOverlay.height = CANVAS_H;
+		const draftCtx2 = get2dCtx(draftOverlay);
+		const lineartCtx2 = get2dCtx(lineartOverlay);
+		let hasDraft = false, hasLineart = false;
+		for (const s of sel.vectorStrokes) {
+			if (s.layer === 'draft') {
+				renderStrokeToCtx(draftCtx2, s);
+				hasDraft = true;
+			} else {
+				renderStrokeToCtx(lineartCtx2, s);
+				hasLineart = true;
+			}
+		}
+		// Draft first (under), at the live draftOpacity. Lineart on top at full alpha.
+		if (hasDraft) {
+			c.save();
+			c.globalAlpha = draftOpacity.value;
+			c.drawImage(draftOverlay, -cx, -cy);
+			c.restore();
+		}
+		if (hasLineart) c.drawImage(lineartOverlay, -cx, -cy);
+	}
+
+	// Bounding box outline + handles — drawn at the un-scaled stroke width so
+	// they remain visible at any zoom/scale. We undo the scale temporarily for
+	// stroke widths and handle sizes.
+	c.lineWidth = 1.5 / sel.scale;
+	c.setLineDash([5 / sel.scale, 4 / sel.scale]);
+	c.strokeStyle = 'rgba(40, 120, 220, 0.9)';
+	c.strokeRect(-halfW, -halfH, sel.bboxW, sel.bboxH);
+	c.setLineDash([]);
+
+	// Rotate handle: small filled circle above the top edge, connected by a
+	// short line so users see what it controls.
+	const rotateOffset = 30 / sel.scale;
+	c.beginPath();
+	c.moveTo(0, -halfH);
+	c.lineTo(0, -halfH - rotateOffset);
+	c.stroke();
+	const handleR = 6 / sel.scale;
+	c.fillStyle = '#fff';
+	c.beginPath();
+	c.arc(0, -halfH - rotateOffset, handleR, 0, Math.PI * 2);
+	c.fill();
+	c.stroke();
+
+	// Corner handles: small filled squares on each bbox corner for scaling.
+	const sqHalf = 5 / sel.scale;
+	for (const [hx, hy] of [
+		[-halfW, -halfH], [halfW, -halfH], [-halfW, halfH], [halfW, halfH],
+	]) {
+		c.fillStyle = '#fff';
+		c.fillRect(hx - sqHalf, hy - sqHalf, sqHalf * 2, sqHalf * 2);
+		c.strokeRect(hx - sqHalf, hy - sqHalf, sqHalf * 2, sqHalf * 2);
+	}
+
 	c.restore();
 }
 
@@ -1861,6 +2053,283 @@ function paintLiveDrawSegment(
 	layerCtx.restore();
 }
 
+// エアブラシ用のソフト円形スタンプ。色×硬さの組ごとに 1 枚キャッシュし、
+// 描画時には drawImage で目的サイズに拡縮して使う。
+// segment-shadowBlur 方式は隣接セグメントの halo が source-over で重なり
+// alpha が累積するため、ストロークに沿って粒立った筋（ノイズ感）が出やすい。
+// 高密度な radial-gradient スタンプは中心の不透明コアが上書きで支配的になる
+// ため、ストローク中央付近の不要な濃淡変動が出にくく、外周だけが滑らかに
+// フェードする = 自然なエアブラシのグラデーションになる。
+const AIRBRUSH_STAMP_SIZE = 256;
+let airbrushStampCanvas: HTMLCanvasElement | null = null;
+let airbrushStampKey = '';
+
+function ensureAirbrushStamp(opaqueColor: string, hardness: number): HTMLCanvasElement {
+	const key = `${opaqueColor}|${hardness.toFixed(3)}`;
+	if (airbrushStampCanvas && airbrushStampKey === key) return airbrushStampCanvas;
+	const c = airbrushStampCanvas ?? globalThis.document.createElement('canvas');
+	c.width = AIRBRUSH_STAMP_SIZE;
+	c.height = AIRBRUSH_STAMP_SIZE;
+	const sctx = c.getContext('2d');
+	if (!sctx) throw new Error('Failed to acquire 2D context for airbrush stamp');
+	sctx.clearRect(0, 0, AIRBRUSH_STAMP_SIZE, AIRBRUSH_STAMP_SIZE);
+	const cx = AIRBRUSH_STAMP_SIZE / 2;
+	const cy = AIRBRUSH_STAMP_SIZE / 2;
+	const r = AIRBRUSH_STAMP_SIZE / 2;
+	const m = /^rgb\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)$/i.exec(opaqueColor);
+	const [rr, gg, bb] = m ? [+m[1], +m[2], +m[3]] : [0, 0, 0];
+	const colorAt = (a: number) => `rgba(${rr},${gg},${bb},${a})`;
+	// 中心ピーク alpha を低めに抑え、密に重ねて中央が自然に飽和へ向かう設計。
+	// dab 中心同士が重なる中央付近は急速に高 alpha に達する一方、外周は
+	// 緩やかなグラデーションになり、エッジが滑らかに溶ける。
+	const peak = 0.45;
+	// 硬さで内側プラトーの幅を変える: 0=尖った釣鐘、1=広いコア + 細いフェード。
+	const plateau = hardness * 0.55;
+	const grad = sctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+	grad.addColorStop(0, colorAt(peak));
+	if (plateau > 0) grad.addColorStop(plateau, colorAt(peak));
+	grad.addColorStop(plateau + (1 - plateau) * 0.45, colorAt(peak * 0.5));
+	grad.addColorStop(plateau + (1 - plateau) * 0.8, colorAt(peak * 0.15));
+	grad.addColorStop(1, colorAt(0));
+	sctx.fillStyle = grad;
+	sctx.fillRect(0, 0, AIRBRUSH_STAMP_SIZE, AIRBRUSH_STAMP_SIZE);
+	airbrushStampCanvas = c;
+	airbrushStampKey = key;
+	return c;
+}
+
+// Stamp-based airbrush: deposits soft circular dabs along the segment, then
+// composites the live buffer onto the active layer at strokeAlpha (mirrors
+// `paintLiveDrawSegment`'s buffer→layer step).
+function airbrushPaintSegment(
+	ax: number, ay: number, bx: number, by: number,
+	pressureAvg: number,
+	opaqueColor: string,
+	strokeAlpha: number,
+	clip: boolean,
+) {
+	const hardness = airbrushHardness.value;
+	const showCore = airbrushShowCore.value;
+	// 直径は硬さで広さを変える: 硬さ低=広い halo、硬さ高=細く絞る。
+	// 筆圧は 0.5..1.0 にマップして、最低でも一定の広がりを保つ。
+	const diameter = Math.max(2,
+		activeBrushWidth.value * (1 + 2.3 * (1 - hardness)) * (0.5 + 0.5 * pressureAvg),
+	);
+	const r = diameter / 2;
+	const stamp = ensureAirbrushStamp(opaqueColor, hardness);
+	const bufCtx = ensurePaintBuffer();
+	bufCtx.save();
+	bufCtx.globalAlpha = 1;
+	bufCtx.globalCompositeOperation = 'source-over';
+	const dx = bx - ax;
+	const dy = by - ay;
+	const dist = Math.sqrt(dx * dx + dy * dy);
+	// dab spacing = diameter / 14: 中心同士が十分重なる程度に詰めて、累積で
+	// 中央 alpha が飽和する密度。これより粗いと「ぽつぽつ」した模様が見える。
+	const spacing = Math.max(0.5, diameter / 14);
+	const n = Math.max(1, Math.ceil(dist / spacing));
+	// 始点に 1 発、以後 spacing おきに dab を置く。連続呼び出しでは前 segment の
+	// 終点が次の始点になるため重複は最小限。
+	bufCtx.drawImage(stamp, ax - r, ay - r, diameter, diameter);
+	for (let i = 1; i <= n; i++) {
+		const t = i / n;
+		const x = ax + dx * t;
+		const y = ay + dy * t;
+		bufCtx.drawImage(stamp, x - r, y - r, diameter, diameter);
+	}
+	if (showCore) {
+		const coreW = Math.max(0.5,
+			activeBrushWidth.value * (0.3 + 0.4 * hardness) * (0.5 + 0.5 * pressureAvg),
+		);
+		bufCtx.lineCap = 'round';
+		bufCtx.lineJoin = 'round';
+		bufCtx.strokeStyle = opaqueColor;
+		bufCtx.lineWidth = coreW;
+		bufCtx.beginPath();
+		bufCtx.moveTo(ax, ay);
+		bufCtx.lineTo(bx, by);
+		bufCtx.stroke();
+	}
+	bufCtx.restore();
+	if (!paintLiveLayer) return;
+	const layerCtx = getLayerCtx(paintLiveLayer);
+	layerCtx.save();
+	layerCtx.setTransform(1, 0, 0, 1, 0, 0);
+	layerCtx.globalCompositeOperation = 'copy';
+	layerCtx.drawImage(paintBaselineCanvas, 0, 0);
+	layerCtx.globalCompositeOperation = clip ? 'source-atop' : 'source-over';
+	layerCtx.globalAlpha = strokeAlpha;
+	layerCtx.drawImage(paintBuffer, 0, 0);
+	layerCtx.globalAlpha = 1;
+	layerCtx.restore();
+}
+
+// 直線 segment を ~1px ごとの sub-segment に分割し、線形補間した lineWidth で
+// 各 sub-segment を stroke() する。stroke の入りと抜き (中点との境) で使用。
+function penDrawLineSubdividedToCtx(
+	dctx: CanvasRenderingContext2D,
+	ax: number, ay: number, bx: number, by: number,
+	pA: number, pB: number,
+	baseWidth: number,
+	opaqueColor: string,
+) {
+	const dx = bx - ax;
+	const dy = by - ay;
+	const dist = Math.sqrt(dx * dx + dy * dy);
+	const k = Math.min(64, Math.max(1, Math.ceil(dist)));
+	dctx.save();
+	dctx.lineCap = 'round';
+	dctx.lineJoin = 'round';
+	dctx.strokeStyle = opaqueColor;
+	for (let i = 0; i < k; i++) {
+		const t0 = i / k;
+		const t1 = (i + 1) / k;
+		const sx = ax + dx * t0;
+		const sy = ay + dy * t0;
+		const ex = ax + dx * t1;
+		const ey = ay + dy * t1;
+		const subP = pA + (pB - pA) * (t0 + t1) / 2;
+		dctx.lineWidth = Math.max(0.5, baseWidth * subP);
+		dctx.beginPath();
+		dctx.moveTo(sx, sy);
+		dctx.lineTo(ex, ey);
+		dctx.stroke();
+	}
+	dctx.restore();
+}
+
+// 二次ベジエを ~1px ごとに sub-divide して stroke() する。中心線が C1 連続な
+// 滑らかカーブとして描かれる + lineWidth も二次補間で連続的に変化する。
+// polyline 描画にあった「角」と「太さ段差」を同時に解消する。
+function penDrawQuadraticToCtx(
+	dctx: CanvasRenderingContext2D,
+	p0x: number, p0y: number, p0p: number,
+	cx: number, cy: number, cp: number,
+	p1x: number, p1y: number, p1p: number,
+	baseWidth: number,
+	opaqueColor: string,
+) {
+	const d1 = Math.sqrt((cx - p0x) * (cx - p0x) + (cy - p0y) * (cy - p0y));
+	const d2 = Math.sqrt((p1x - cx) * (p1x - cx) + (p1y - cy) * (p1y - cy));
+	const k = Math.min(96, Math.max(1, Math.ceil(d1 + d2)));
+	dctx.save();
+	dctx.lineCap = 'round';
+	dctx.lineJoin = 'round';
+	dctx.strokeStyle = opaqueColor;
+	let prevX = p0x;
+	let prevY = p0y;
+	for (let i = 1; i <= k; i++) {
+		const t = i / k;
+		const omt = 1 - t;
+		const x = omt * omt * p0x + 2 * omt * t * cx + t * t * p1x;
+		const y = omt * omt * p0y + 2 * omt * t * cy + t * t * p1y;
+		const tMid = (i - 0.5) / k;
+		const omtMid = 1 - tMid;
+		const w = omtMid * omtMid * p0p + 2 * omtMid * tMid * cp + tMid * tMid * p1p;
+		dctx.lineWidth = Math.max(0.5, baseWidth * w);
+		dctx.beginPath();
+		dctx.moveTo(prevX, prevY);
+		dctx.lineTo(x, y);
+		dctx.stroke();
+		prevX = x;
+		prevY = y;
+	}
+	dctx.restore();
+}
+
+// pen のカーブ平滑化状態。直前の中点と直前の入力点を保持して、新しい入力点が
+// 来たら「前中点 → 直前点 (制御点) → 新中点」の二次ベジエを描画する。
+// pointerdown でリセット、pointerup の最後で「最後の中点 → 最後の入力点」を
+// 直線で締める。
+let penCurveLastMidX = 0;
+let penCurveLastMidY = 0;
+let penCurveLastMidP = 0;
+let penCurveHasLastMid = false;
+let penCurveLastEndX = 0;
+let penCurveLastEndY = 0;
+let penCurveLastEndP = 0;
+
+function resetPenCurve() {
+	penCurveHasLastMid = false;
+}
+
+// Live ペンの筆走り。bufCtx に curve を積み上げ、毎回 baseline + buffer を
+// strokeAlpha で合成し直す (paintLiveDrawSegment と同じビーズ抑止パターン)。
+function penPaintLive(
+	ax: number, ay: number, bx: number, by: number,
+	pA: number, pB: number,
+	opaqueColor: string,
+	strokeAlpha: number,
+	clip: boolean,
+) {
+	const mx = (ax + bx) / 2;
+	const my = (ay + by) / 2;
+	const mp = (pA + pB) / 2;
+	const bufCtx = ensurePaintBuffer();
+	bufCtx.save();
+	bufCtx.globalCompositeOperation = 'source-over';
+	bufCtx.globalAlpha = 1;
+	if (!penCurveHasLastMid) {
+		// First segment in stroke: 始点から中点までを直線で結ぶ (= 始端の半分)。
+		penDrawLineSubdividedToCtx(bufCtx, ax, ay, mx, my, pA, mp, activeBrushWidth.value, opaqueColor);
+	} else {
+		// 前の中点 → (ax, ay) を制御点 → 現在の中点 を二次ベジエで結ぶ。
+		penDrawQuadraticToCtx(bufCtx,
+			penCurveLastMidX, penCurveLastMidY, penCurveLastMidP,
+			ax, ay, pA,
+			mx, my, mp,
+			activeBrushWidth.value, opaqueColor,
+		);
+	}
+	bufCtx.restore();
+	penCurveLastMidX = mx;
+	penCurveLastMidY = my;
+	penCurveLastMidP = mp;
+	penCurveLastEndX = bx;
+	penCurveLastEndY = by;
+	penCurveLastEndP = pB;
+	penCurveHasLastMid = true;
+	if (!paintLiveLayer) return;
+	const layerCtx = getLayerCtx(paintLiveLayer);
+	layerCtx.save();
+	layerCtx.setTransform(1, 0, 0, 1, 0, 0);
+	layerCtx.globalCompositeOperation = 'copy';
+	layerCtx.drawImage(paintBaselineCanvas, 0, 0);
+	layerCtx.globalCompositeOperation = clip ? 'source-atop' : 'source-over';
+	layerCtx.globalAlpha = strokeAlpha;
+	layerCtx.drawImage(paintBuffer, 0, 0);
+	layerCtx.globalAlpha = 1;
+	layerCtx.restore();
+}
+
+// pointerup の tail flush 後に呼び出して、最後の中点から最後の入力点までを
+// 直線で締める (= 終端の半分)。これで stroke の見た目が完全になる。
+function finishPenCurve(opaqueColor: string, strokeAlpha: number, clip: boolean) {
+	if (!penCurveHasLastMid) return;
+	const bufCtx = ensurePaintBuffer();
+	bufCtx.save();
+	bufCtx.globalCompositeOperation = 'source-over';
+	bufCtx.globalAlpha = 1;
+	penDrawLineSubdividedToCtx(bufCtx,
+		penCurveLastMidX, penCurveLastMidY,
+		penCurveLastEndX, penCurveLastEndY,
+		penCurveLastMidP, penCurveLastEndP,
+		activeBrushWidth.value, opaqueColor,
+	);
+	bufCtx.restore();
+	if (!paintLiveLayer) return;
+	const layerCtx = getLayerCtx(paintLiveLayer);
+	layerCtx.save();
+	layerCtx.setTransform(1, 0, 0, 1, 0, 0);
+	layerCtx.globalCompositeOperation = 'copy';
+	layerCtx.drawImage(paintBaselineCanvas, 0, 0);
+	layerCtx.globalCompositeOperation = clip ? 'source-atop' : 'source-over';
+	layerCtx.globalAlpha = strokeAlpha;
+	layerCtx.drawImage(paintBuffer, 0, 0);
+	layerCtx.globalAlpha = 1;
+	layerCtx.restore();
+}
+
 // Per-brush parameters for the buffer-based live-draw flow. Each segment of the
 // active stroke routes through `paintLiveDrawSegment` with the right shadow / blend
 // for the selected tool. The buffer's contents accumulate at full alpha while the
@@ -1868,28 +2337,22 @@ function paintLiveDrawSegment(
 // which avoids the alpha-doubling bead artefact at segment endpoints.
 function brushBufferStamp(
 	ax: number, ay: number, bx: number, by: number,
-	pressureAvg: number,
+	pA: number, pB: number,
 	opaque: string,
 	alpha: number,
 	clip: boolean,
 ) {
-	const baseW = Math.max(0.5, activeBrushWidth.value * pressureAvg);
+	const pAvg = (pA + pB) / 2;
+	const baseW = Math.max(0.5, activeBrushWidth.value * pAvg);
 	if (tool.value === 'airbrush') {
-		const hardness = airbrushHardness.value;
-		const showCore = airbrushShowCore.value;
-		const blurFactor = (1 - hardness) * 1.5;
-		const lineFactor = 0.3 + 0.7 * hardness;
-		const albLw = Math.max(0.5, activeBrushWidth.value * lineFactor * (0.5 + 0.5 * pressureAvg));
-		const blur = activeBrushWidth.value * blurFactor * (0.5 + 0.5 * pressureAvg);
-		const offsetX = showCore ? 0 : CANVAS_W * 2;
-		paintLiveDrawSegment(ax - offsetX, ay, bx - offsetX, by, albLw, opaque, alpha, clip, { color: opaque, blur, offsetX, offsetY: 0 });
+		airbrushPaintSegment(ax, ay, bx, by, pAvg, opaque, alpha, clip);
 		return;
 	}
 	if (tool.value === 'watercolor') {
 		// Soft-edge with shadowBlur, lower effective alpha so repeated passes build up
 		// density gradually — closer to real watercolor than a flat opacity stroke.
 		const blur = activeBrushWidth.value * watercolorBleed.value;
-		const lw = Math.max(0.5, activeBrushWidth.value * (0.4 + 0.6 * pressureAvg));
+		const lw = Math.max(0.5, activeBrushWidth.value * (0.4 + 0.6 * pAvg));
 		paintLiveDrawSegment(ax, ay, bx, by, lw, opaque, alpha * watercolorDensity.value, clip, { color: opaque, blur });
 		return;
 	}
@@ -1904,8 +2367,8 @@ function brushBufferStamp(
 		paintLiveDrawSegment(ax, ay, bx, by, baseW, opaque, alpha * dodgeIntensity.value, clip, undefined, 'lighter');
 		return;
 	}
-	// Default: pen
-	paintLiveDrawSegment(ax, ay, bx, by, baseW, opaque, alpha, clip);
+	// Default: pen — sub-divided stroke で太さ変化を sub-pixel 刻みに
+	penPaintLive(ax, ay, bx, by, pA, pB, opaque, alpha, clip);
 }
 
 // Mixer (smudge / 指先) — implemented as a true per-pixel blur. Each dab reads
@@ -2042,13 +2505,70 @@ function renderStrokeToCtx(
 		return;
 	}
 
-	// Pen / paint / watercolor / mixer all route through a unified two-pass renderer that
-	// stamps segments onto a throwaway buffer at full alpha and composites the union shape
-	// at the stroke's transparency in one step. Segment-level alpha overlap (the "string of
-	// beads" artefact) disappears because identical-colour overlap at alpha 1 is idempotent.
-	// Watercolor adds shadowBlur per segment for soft edges, mixer samples the target ctx
-	// at each midpoint and lerps the brush colour with the sampled pixel.
-	if (stroke.tool === 'pen' || stroke.tool === 'paint' || stroke.tool === 'watercolor' || stroke.tool === 'mixer' || stroke.tool === 'airbrush') {
+	// ペンは中点を通る二次ベジエ列で再描画 (Live と同じ平滑化アルゴリズム)。
+	// polyline の角と segment 境界の太さ段差を同時に解消する。
+	if (stroke.tool === 'pen') {
+		const tmp = globalThis.document.createElement('canvas');
+		tmp.width = CANVAS_W;
+		tmp.height = CANVAS_H;
+		const tctx = tmp.getContext('2d');
+		if (!tctx) return;
+		const [r, g, b, alphaByte] = parseColorRGBA(stroke.color);
+		const opaqueColor = `rgb(${r},${g},${b})`;
+		const baseWidth = Math.max(1, stroke.width * CANVAS_W);
+		const np = stroke.points.length;
+		const getP = (idx: number): [number, number, number] => {
+			const pt = stroke.points[idx];
+			const pp = pt.length >= 3 ? (pt[2] as number) : 1;
+			return [pt[0] * CANVAS_W, pt[1] * CANVAS_H, pp];
+		};
+		if (np === 1) {
+			const [x, y, pp] = getP(0);
+			penDrawLineSubdividedToCtx(tctx, x, y, x + 0.01, y, pp, pp, baseWidth, opaqueColor);
+		} else if (np === 2) {
+			const [x0, y0, p0p] = getP(0);
+			const [x1, y1, p1p] = getP(1);
+			penDrawLineSubdividedToCtx(tctx, x0, y0, x1, y1, p0p, p1p, baseWidth, opaqueColor);
+		} else {
+			// 3 点以上は中点を通る二次ベジエ列で繋ぐ。先頭は P_0→M_01 の直線、
+			// 続く P_i ごとに M_{i-1,i}→P_i (制御)→M_{i,i+1} の二次ベジエ、
+			// 末尾は M_{n-2,n-1}→P_{n-1} の直線で締める。
+			const [x0, y0, p0p] = getP(0);
+			const [x1, y1, p1p] = getP(1);
+			let prevMidX = (x0 + x1) / 2;
+			let prevMidY = (y0 + y1) / 2;
+			let prevMidP = (p0p + p1p) / 2;
+			penDrawLineSubdividedToCtx(tctx, x0, y0, prevMidX, prevMidY, p0p, prevMidP, baseWidth, opaqueColor);
+			for (let i = 1; i < np - 1; i++) {
+				const [cx, cy, cp] = getP(i);
+				const [nx, ny, npp] = getP(i + 1);
+				const midX = (cx + nx) / 2;
+				const midY = (cy + ny) / 2;
+				const midP = (cp + npp) / 2;
+				penDrawQuadraticToCtx(tctx,
+					prevMidX, prevMidY, prevMidP,
+					cx, cy, cp,
+					midX, midY, midP,
+					baseWidth, opaqueColor,
+				);
+				prevMidX = midX;
+				prevMidY = midY;
+				prevMidP = midP;
+			}
+			const [lx, ly, lp] = getP(np - 1);
+			penDrawLineSubdividedToCtx(tctx, prevMidX, prevMidY, lx, ly, prevMidP, lp, baseWidth, opaqueColor);
+		}
+		c.save();
+		c.globalCompositeOperation = stroke.clip ? 'source-atop' : 'source-over';
+		c.globalAlpha = alphaByte / 255;
+		c.drawImage(tmp, 0, 0);
+		c.restore();
+		return;
+	}
+
+	// Paint / watercolor / mixer / airbrush は旧来の segment-stroke 方式。
+	// (airbrush は main-only で実際にはこのパスを通らないが、形だけ残す)
+	if (stroke.tool === 'paint' || stroke.tool === 'watercolor' || stroke.tool === 'mixer' || stroke.tool === 'airbrush') {
 		const tmp = globalThis.document.createElement('canvas');
 		tmp.width = CANVAS_W;
 		tmp.height = CANVAS_H;
@@ -2183,6 +2703,709 @@ function resolveStrokeLayer(stroke: ChatDrawingStroke): 'main' | 'draft' | 'line
 function renderStroke(stroke: ChatDrawingStroke) {
 	renderStrokeToCtx(getLayerCtx(resolveStrokeLayer(stroke)), stroke);
 	recompositeDisplay();
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Lasso selection — captures content from all three layers inside a free-form
+// polygon, lifts it onto a transient floating overlay, and exposes scale /
+// rotate / move / delete operations. On commit the floating selection is
+// re-baked into the layers at its final transform; on cancel the originals
+// are restored. While a selection is active, the underlying layers are shown
+// with a "hole" where the selection was lifted from.
+// ────────────────────────────────────────────────────────────────────────────
+
+type LassoPoint = [number, number];
+type LassoPolygon = LassoPoint[];
+
+// Floating-selection state. `null` outside any selection.
+type FloatingSelection = {
+	// Closed polygon in canvas space — points the user drew, used both for
+	// hit-testing and for clipping the captured raster + vector content.
+	polygon: LassoPolygon;
+	// Bounding box of `polygon` (axis-aligned, in canvas pixels). Used as the
+	// pivot anchor for rotation/scaling and to size the overlay handles.
+	bboxX: number; bboxY: number; bboxW: number; bboxH: number;
+
+	// Raster portion lifted from main, masked by the polygon. Stored on its own
+	// canvas the size of the bbox so transforms apply to a tight footprint.
+	// null when no main pixels were captured (selection was over empty area).
+	rasterCanvas: HTMLCanvasElement | null;
+
+	// Vector pieces lifted from lineart/draft. Each entry is a stroke whose
+	// points are entirely inside the polygon. Strokes that crossed the boundary
+	// have been split at the crossings and only the inside fragments live here.
+	// Coordinates are in normalised canvas space (matching ChatDrawingStroke).
+	vectorStrokes: ChatDrawingStroke[];
+
+	// Stroke ids that were removed from `strokes[]` (fully inside) or replaced
+	// by their outside-fragments. Needed at commit time to broadcast the
+	// removals to peers via drawUndo.
+	removedOriginalIds: string[];
+	// Outside-fragments that need to be broadcast as new strokes (replacing
+	// originals that crossed the lasso boundary).
+	outsideFragments: ChatDrawingStroke[];
+
+	// Snapshots for cancel. mainSnapshot is the ImageData that was lifted out
+	// of mainCanvas at capture time (null when no main pixels selected).
+	// originalStrokes is a reference list of the original strokes that were
+	// removed/split — restored on cancel via deep copy.
+	mainSnapshot: ImageData | null;
+	originalStrokes: ChatDrawingStroke[];
+
+	// Affine transform applied to the floating preview, anchored at the bbox
+	// centre. tx/ty translate the bbox centre away from its original position,
+	// scale and rotation pivot around (bboxX + bboxW/2 + tx, bboxY + bboxH/2 + ty).
+	tx: number; ty: number;
+	// rotation in radians
+	rotation: number;
+	// uniform scale, simpler UX than independent x/y
+	scale: number;
+	// True once the actual cut has been performed — vector strokes split,
+	// main pixels lifted, originals removed from strokes[]. False between
+	// polygon-close and the first user transform: the underlying layers are
+	// still intact, the overlay just shows the polygon + bbox + handles.
+	isCut: boolean;
+};
+
+const lassoSelection = ref<FloatingSelection | null>(null);
+// Polygon currently being drawn (pointer down in lasso mode, before capture
+// completes). Drawn live in the overlay with a thin dashed line.
+const lassoDrawingPolygon = ref<LassoPolygon | null>(null);
+// In-progress transform. Records what the user grabbed at pointerDown so move
+// deltas can be applied relative to that anchor.
+type LassoDragMode = 'move' | 'scale' | 'rotate';
+let lassoDrag: null | {
+	mode: LassoDragMode;
+	pointerId: number;
+	startX: number; startY: number;
+	// Snapshot of selection state at drag start so live moves are deltas.
+	startTx: number; startTy: number;
+	startRotation: number;
+	startScale: number;
+} = null;
+
+// Lasso commits push a single compound entry to `myUndoStack` (using a synthetic
+// id with the `lasso:` prefix). The entry stores everything needed to reverse
+// the operation: the strokes that were added, the originals that were removed,
+// and ImageData snapshots covering the union of source and destination on
+// mainCanvas — undo blits the "before" snapshot back, redo blits the "after".
+type LassoUndoEntry = {
+	addedStrokes: ChatDrawingStroke[];
+	removedStrokes: ChatDrawingStroke[];
+	// Union bbox covering source + destination in canvas-px space.
+	unionX: number; unionY: number; unionW: number; unionH: number;
+	// pre-operation pixels (source intact, dest unchanged)
+	mainBeforeUnion: ImageData | null;
+	// post-operation pixels (source erased, dest pasted)
+	mainAfterUnion: ImageData | null;
+};
+const lassoUndoEntries = new Map<string, LassoUndoEntry>();
+
+function newLassoUndoId(): string {
+	return 'lasso:' + newStrokeId();
+}
+
+// Redo stack tracking undo steps taken WHILE a floating lasso selection is
+// active (i.e., before commit). Each undo of a still-floating selection pushes
+// one entry; redo while floating pops one off. New user actions (fresh polygon,
+// fresh transform) invalidate the stack so stale redos don't resurrect old
+// state.
+type LassoFloatingRedoEntry =
+	| { kind: 'transform-reset'; tx: number; ty: number; rotation: number; scale: number }
+	| {
+		kind: 'cancel';
+		polygon: LassoPolygon;
+		bboxX: number; bboxY: number; bboxW: number; bboxH: number;
+	};
+const lassoFloatingRedoStack: LassoFloatingRedoEntry[] = [];
+
+function clearLassoFloatingRedo() {
+	lassoFloatingRedoStack.length = 0;
+}
+
+// Compose mainBeforeUnion: the pixels at the union bbox AS THEY WERE before
+// the lasso operation. Current mainCanvas at this point has the source hole
+// (capture cleared it), so we draw sel.mainSnapshot back at the source position
+// onto a temp canvas to reconstruct the pre-capture state.
+function composeMainBeforeUnion(
+	mctx: CanvasRenderingContext2D,
+	sourceMain: ImageData,
+	sourceX: number, sourceY: number,
+	unionX: number, unionY: number, unionW: number, unionH: number,
+): ImageData {
+	const tmp = globalThis.document.createElement('canvas');
+	tmp.width = unionW;
+	tmp.height = unionH;
+	const tctx = get2dCtx(tmp);
+	// Step 1: paint current mainCanvas at union (which has the source hole).
+	tctx.drawImage(mainCanvas, unionX, unionY, unionW, unionH, 0, 0, unionW, unionH);
+	// Step 2: drawImage of sel.mainSnapshot (via a scratch canvas, since we
+	// can't drawImage directly from an ImageData) at the source's offset
+	// inside the union — fills the hole.
+	const src = globalThis.document.createElement('canvas');
+	src.width = sourceMain.width;
+	src.height = sourceMain.height;
+	get2dCtx(src).putImageData(sourceMain, 0, 0);
+	tctx.drawImage(src, sourceX - unionX, sourceY - unionY);
+	void mctx;
+	return tctx.getImageData(0, 0, unionW, unionH);
+}
+
+// Standard ray-casting point-in-polygon test, polygon is a list of [x,y] in
+// canvas-pixel space and treated as a closed loop. Returns true if (x, y)
+// is inside (boundary cases are unstable but that's acceptable for selection).
+function pointInPolygon(x: number, y: number, poly: LassoPolygon): boolean {
+	let inside = false;
+	for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+		const xi = poly[i][0], yi = poly[i][1];
+		const xj = poly[j][0], yj = poly[j][1];
+		const intersect = ((yi > y) !== (yj > y))
+			&& (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi);
+		if (intersect) inside = !inside;
+	}
+	return inside;
+}
+
+// Compute the intersection point (and parameter t along ab) of segment ab and
+// segment cd. Returns null if they don't intersect within both segments.
+function segmentIntersection(
+	ax: number, ay: number, bx: number, by: number,
+	cx: number, cy: number, dx: number, dy: number,
+): { x: number; y: number; t: number } | null {
+	const rx = bx - ax;
+	const ry = by - ay;
+	const sx = dx - cx;
+	const sy = dy - cy;
+	const denom = rx * sy - ry * sx;
+	if (Math.abs(denom) < 1e-9) return null;
+	const t = ((cx - ax) * sy - (cy - ay) * sx) / denom;
+	const u = ((cx - ax) * ry - (cy - ay) * rx) / denom;
+	if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+	return { x: ax + rx * t, y: ay + ry * t, t };
+}
+
+// Find every place a single stroke segment ab crosses the polygon boundary,
+// returned sorted along ab (smallest t first).
+function findPolygonCrossings(
+	ax: number, ay: number, bx: number, by: number,
+	poly: LassoPolygon,
+): { x: number; y: number; t: number }[] {
+	const out: { x: number; y: number; t: number }[] = [];
+	for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+		const hit = segmentIntersection(ax, ay, bx, by, poly[j][0], poly[j][1], poly[i][0], poly[i][1]);
+		if (hit) out.push(hit);
+	}
+	out.sort((p, q) => p.t - q.t);
+	return out;
+}
+
+// Split a vector stroke at every place it crosses the lasso polygon. Returns
+// `inside` and `outside` lists of new stroke fragments (each fragment has its
+// own fresh id; original id is dropped). A stroke wholly inside or wholly
+// outside the polygon ends up as a single fragment in the matching list.
+function splitStrokeAtPolygon(stroke: ChatDrawingStroke, poly: LassoPolygon): {
+	inside: ChatDrawingStroke[];
+	outside: ChatDrawingStroke[];
+} {
+	const inside: ChatDrawingStroke[] = [];
+	const outside: ChatDrawingStroke[] = [];
+	if (stroke.points.length === 0) return { inside, outside };
+
+	// Text and fill strokes don't decompose meaningfully — pick a side based on
+	// the anchor point. Fill is degenerate (single seed point); text uses its
+	// anchor too. Either way, the whole stroke goes to one side.
+	if (stroke.tool === 'fill' || stroke.tool === 'text' || stroke.points.length === 1) {
+		const p = stroke.points[0];
+		const px = p[0] * CANVAS_W;
+		const py = p[1] * CANVAS_H;
+		const dst = pointInPolygon(px, py, poly) ? inside : outside;
+		dst.push({ ...stroke, id: newStrokeId(), points: stroke.points.map(pp => pp.slice()) });
+		return { inside, outside };
+	}
+
+	// For multi-point strokes: walk segment-by-segment, accumulating into the
+	// "current" fragment. When we cross the polygon, end the current fragment
+	// at the crossing and start a new one on the other side.
+	let fragmentInside = pointInPolygon(stroke.points[0][0] * CANVAS_W, stroke.points[0][1] * CANVAS_H, poly);
+	let fragmentPoints: number[][] = [stroke.points[0].slice()];
+
+	const flush = () => {
+		if (fragmentPoints.length < 2) {
+			// A single point makes no visible mark for line-style strokes; drop it.
+			fragmentPoints = [];
+			return;
+		}
+		const dst = fragmentInside ? inside : outside;
+		dst.push({ ...stroke, id: newStrokeId(), points: fragmentPoints });
+		fragmentPoints = [];
+	};
+
+	for (let i = 1; i < stroke.points.length; i++) {
+		const pa = stroke.points[i - 1];
+		const pb = stroke.points[i];
+		const ax = pa[0] * CANVAS_W, ay = pa[1] * CANVAS_H;
+		const bx = pb[0] * CANVAS_W, by = pb[1] * CANVAS_H;
+		const crossings = findPolygonCrossings(ax, ay, bx, by, poly);
+		// Walk through this segment crossing-by-crossing, flipping inside/outside.
+		let lastT = 0;
+		for (const c of crossings) {
+			const cnx = c.x / CANVAS_W;
+			const cny = c.y / CANVAS_H;
+			// Pressure: linearly interpolate between pa and pb at parameter c.t.
+			const cpr = pa.length >= 3 && pb.length >= 3
+				? (pa[2] as number) * (1 - c.t) + (pb[2] as number) * c.t
+				: 1;
+			const crossPoint = pa.length >= 3 ? [cnx, cny, cpr] : [cnx, cny];
+			fragmentPoints.push(crossPoint);
+			flush();
+			fragmentInside = !fragmentInside;
+			fragmentPoints.push(crossPoint.slice());
+			lastT = c.t;
+		}
+		// No more crossings on this segment — end-point goes into the current fragment.
+		void lastT;
+		fragmentPoints.push(pb.slice());
+	}
+	flush();
+
+	return { inside, outside };
+}
+
+// Lasso ops mutate strokes[] (remove/split originals, add fragments / transformed
+// copies) AND mainCanvas (lift/stamp pixels). Going through redrawAll afterwards
+// is wrong because:
+//   - baselineLineart / baselineDraft still hold the originals if they were
+//     already baked, so a redrawAll re-blits them and the "removed" strokes
+//     come back as ghosts.
+//   - baselineMainCanvas may not contain the freshly-stamped raster (on a
+//     fresh drawing where the snapshot was empty), so a main-reset wipes the
+//     committed lasso content.
+// Rebuild the vector layers from the post-mutation strokes[] directly, then
+// re-snapshot all three layers as the new baseline so subsequent redraws
+// agree with what we've just put on screen.
+function rebuildVectorLayersFromStrokes() {
+	for (const layer of ['lineart', 'draft'] as const) {
+		const c = getLayerCtx(layer);
+		c.save();
+		c.setTransform(1, 0, 0, 1, 0, 0);
+		c.clearRect(0, 0, CANVAS_W, CANVAS_H);
+		c.restore();
+	}
+	for (const s of strokes.value) {
+		const layer = resolveStrokeLayer(s);
+		if (layer !== 'lineart' && layer !== 'draft') continue;
+		renderStrokeToCtx(getLayerCtx(layer), s);
+	}
+}
+
+// Apply the floating selection's transform to a single point in canvas-pixel
+// space. The transform is centred on the bbox so rotation/scaling pivot there.
+function applyLassoTransform(sel: FloatingSelection, x: number, y: number): [number, number] {
+	const cx = sel.bboxX + sel.bboxW / 2;
+	const cy = sel.bboxY + sel.bboxH / 2;
+	const dx = x - cx;
+	const dy = y - cy;
+	const cos = Math.cos(sel.rotation);
+	const sin = Math.sin(sel.rotation);
+	const rx = (dx * cos - dy * sin) * sel.scale;
+	const ry = (dx * sin + dy * cos) * sel.scale;
+	return [cx + sel.tx + rx, cy + sel.ty + ry];
+}
+
+// Capture the lasso selection from the closed polygon. Splits vector strokes,
+// lifts main raster pixels, removes lifted content from the layers, and
+// stashes the originals so cancel can restore them. The actual cut (vector
+// split + main raster lift) is deferred to `performLassoCut` so a selection
+// that the user hasn't moved yet leaves the underlying layers untouched.
+function captureLassoSelection(rawPoly: LassoPolygon) {
+	if (rawPoly.length < 3) return;
+	// Compute bbox
+	let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+	for (const [x, y] of rawPoly) {
+		if (x < minX) minX = x;
+		if (y < minY) minY = y;
+		if (x > maxX) maxX = x;
+		if (y > maxY) maxY = y;
+	}
+	minX = Math.max(0, Math.floor(minX));
+	minY = Math.max(0, Math.floor(minY));
+	maxX = Math.min(CANVAS_W, Math.ceil(maxX));
+	maxY = Math.min(CANVAS_H, Math.ceil(maxY));
+	const bboxW = maxX - minX;
+	const bboxH = maxY - minY;
+	if (bboxW < 2 || bboxH < 2) return;
+
+	// New selection invalidates any pending floating-redo entries from a
+	// previous lasso session.
+	clearLassoFloatingRedo();
+
+	// Lazy capture — empty floating state, no mutation. The cut runs later in
+	// performLassoCut on the first transform delta.
+	lassoSelection.value = {
+		polygon: rawPoly,
+		bboxX: minX, bboxY: minY, bboxW, bboxH,
+		rasterCanvas: null,
+		vectorStrokes: [],
+		removedOriginalIds: [],
+		outsideFragments: [],
+		mainSnapshot: null,
+		originalStrokes: [],
+		tx: 0, ty: 0,
+		rotation: 0,
+		scale: 1,
+		isCut: false,
+	};
+	recompositeDisplay();
+}
+
+// Perform the deferred cut: split vector strokes at the polygon boundary and
+// lift main raster pixels. Called from the pointer-move handler the first time
+// the user actually starts transforming the selection.
+function performLassoCut(sel: FloatingSelection) {
+	if (sel.isCut) return;
+	const rawPoly = sel.polygon;
+
+	// Split every vector stroke at the lasso polygon. Inside fragments become
+	// the floating selection's vectors; outside fragments replace the original.
+	const insideStrokes: ChatDrawingStroke[] = [];
+	const outsideFragments: ChatDrawingStroke[] = [];
+	const removedIds: string[] = [];
+	const originals: ChatDrawingStroke[] = [];
+	const next: ChatDrawingStroke[] = [];
+	for (const s of strokes.value) {
+		if (s.layer !== 'lineart' && s.layer !== 'draft') {
+			next.push(s);
+			continue;
+		}
+		const { inside, outside } = splitStrokeAtPolygon(s, rawPoly);
+		if (inside.length === 0) {
+			next.push(s);
+			continue;
+		}
+		originals.push(JSON.parse(JSON.stringify(s)) as ChatDrawingStroke);
+		if (s.id) removedIds.push(s.id);
+		for (const f of inside) insideStrokes.push(f);
+		for (const f of outside) {
+			outsideFragments.push(f);
+			next.push(f);
+		}
+	}
+	strokes.value = next;
+
+	// Lift the main raster polygon. We grab the bbox, then mask everything
+	// outside the polygon to transparent so the floating canvas only carries
+	// the genuinely-selected pixels.
+	let rasterCanvas: HTMLCanvasElement | null = null;
+	let mainSnapshot: ImageData | null = null;
+	const mctx = getLayerCtx('main');
+	try {
+		mainSnapshot = mctx.getImageData(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
+	} catch {
+		mainSnapshot = null;
+	}
+	if (mainSnapshot) {
+		const out = globalThis.document.createElement('canvas');
+		out.width = sel.bboxW;
+		out.height = sel.bboxH;
+		const octx = get2dCtx(out);
+		octx.save();
+		octx.beginPath();
+		for (let i = 0; i < rawPoly.length; i++) {
+			const px = rawPoly[i][0] - sel.bboxX;
+			const py = rawPoly[i][1] - sel.bboxY;
+			if (i === 0) octx.moveTo(px, py);
+			else octx.lineTo(px, py);
+		}
+		octx.closePath();
+		octx.clip();
+		octx.drawImage(mainCanvas, sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, 0, 0, sel.bboxW, sel.bboxH);
+		octx.restore();
+		rasterCanvas = out;
+		// Erase the polygon from live mainCanvas so the layer shows a hole.
+		mctx.save();
+		mctx.beginPath();
+		for (let i = 0; i < rawPoly.length; i++) {
+			const px = rawPoly[i][0];
+			const py = rawPoly[i][1];
+			if (i === 0) mctx.moveTo(px, py);
+			else mctx.lineTo(px, py);
+		}
+		mctx.closePath();
+		mctx.globalCompositeOperation = 'destination-out';
+		mctx.fillStyle = '#000';
+		mctx.fill();
+		mctx.restore();
+	}
+
+	sel.rasterCanvas = rasterCanvas;
+	sel.vectorStrokes = insideStrokes;
+	sel.removedOriginalIds = removedIds;
+	sel.outsideFragments = outsideFragments;
+	sel.mainSnapshot = mainSnapshot;
+	sel.originalStrokes = originals;
+	sel.isCut = true;
+	// Rebuild lineart/draft to reflect strokes[] (without removed originals);
+	// snapshot all layers so future redraws don't resurrect the originals.
+	rebuildVectorLayersFromStrokes();
+	snapshotBaselineFromLive();
+	recompositeDisplay();
+}
+
+// Bake the floating selection into the layers at its current transform, sync
+// the result via WebSocket, then drop the floating state.
+function commitLassoSelection() {
+	const sel = lassoSelection.value;
+	if (!sel) return;
+	// Commit ends the floating-redo lifecycle.
+	clearLassoFloatingRedo();
+	// Uncut selection (user never moved the floating preview) — drop the
+	// floating state without recording an undo entry. Nothing was lifted, so
+	// there's nothing to commit.
+	if (!sel.isCut) {
+		lassoSelection.value = null;
+		recompositeDisplay();
+		return;
+	}
+	// Use `selRotation` locally — `rotation` at module scope is the view-rotation
+	// ref, and shadowing it inside this function would confuse readers.
+	const { tx, ty, rotation: selRotation, scale } = sel;
+	const cx = sel.bboxX + sel.bboxW / 2;
+	const cy = sel.bboxY + sel.bboxH / 2;
+
+	// Compute the union bbox of source + destination so we can snapshot the
+	// pre / post mainCanvas state once and replay it on undo / redo. Compute
+	// before touching mainCanvas so `mainBeforeUnion` is captured first.
+	const corners: LassoPoint[] = [
+		[sel.bboxX, sel.bboxY],
+		[sel.bboxX + sel.bboxW, sel.bboxY],
+		[sel.bboxX + sel.bboxW, sel.bboxY + sel.bboxH],
+		[sel.bboxX, sel.bboxY + sel.bboxH],
+	];
+	let unionMinX = sel.bboxX, unionMinY = sel.bboxY;
+	let unionMaxX = sel.bboxX + sel.bboxW, unionMaxY = sel.bboxY + sel.bboxH;
+	for (const [x, y] of corners) {
+		const [tX, tY] = applyLassoTransform(sel, x, y);
+		if (tX < unionMinX) unionMinX = tX;
+		if (tY < unionMinY) unionMinY = tY;
+		if (tX > unionMaxX) unionMaxX = tX;
+		if (tY > unionMaxY) unionMaxY = tY;
+	}
+	const unionX = Math.max(0, Math.floor(unionMinX) - 2);
+	const unionY = Math.max(0, Math.floor(unionMinY) - 2);
+	const unionW = Math.min(CANVAS_W - unionX, Math.ceil(unionMaxX) - unionX + 4);
+	const unionH = Math.min(CANVAS_H - unionY, Math.ceil(unionMaxY) - unionY + 4);
+
+	const mctx = getLayerCtx('main');
+	// "Before" snapshot — current mainCanvas at union has the source hole;
+	// composite sel.mainSnapshot back onto a temp canvas to reconstruct the
+	// pre-capture state. Skipped when no main pixels were involved.
+	const mainBeforeUnion = sel.mainSnapshot
+		? composeMainBeforeUnion(mctx, sel.mainSnapshot, sel.bboxX, sel.bboxY, unionX, unionY, unionW, unionH)
+		: null;
+
+	// Vector strokes: transform every point and add to strokes[] / broadcast.
+	const transformedAdded: ChatDrawingStroke[] = [];
+	for (const s of sel.vectorStrokes) {
+		const transformed: ChatDrawingStroke = {
+			...s,
+			id: newStrokeId(),
+			points: s.points.map(p => {
+				const px = p[0] * CANVAS_W;
+				const py = p[1] * CANVAS_H;
+				const dx = px - cx;
+				const dy = py - cy;
+				const cos = Math.cos(selRotation);
+				const sin = Math.sin(selRotation);
+				const rx = (dx * cos - dy * sin) * scale + cx + tx;
+				const ry = (dx * sin + dy * cos) * scale + cy + ty;
+				const out: number[] = [rx / CANVAS_W, ry / CANVAS_H];
+				if (p.length >= 3) out.push(p[2] as number);
+				return out;
+			}),
+		};
+		strokes.value.push(transformed);
+		renderStroke(transformed);
+		props.connection.send('drawStroke', { drawingId: props.drawingId, stroke: transformed });
+		transformedAdded.push(transformed);
+	}
+
+	// Outside fragments (already in strokes[] from capture) need to be broadcast
+	// so peers see the split version of the originals.
+	for (const f of sel.outsideFragments) {
+		props.connection.send('drawStroke', { drawingId: props.drawingId, stroke: f });
+	}
+	// Removed originals → drawUndo for each so peers drop them.
+	for (const id of sel.removedOriginalIds) {
+		props.connection.send('drawUndo', { drawingId: props.drawingId, strokeId: id });
+	}
+
+	// Raster: stamp the floating raster onto main at its transform, then send
+	// a tile patch covering the union of the original bbox + the new bbox.
+	if (sel.rasterCanvas) {
+		mctx.save();
+		mctx.translate(cx + tx, cy + ty);
+		mctx.rotate(selRotation);
+		mctx.scale(scale, scale);
+		mctx.drawImage(sel.rasterCanvas, -sel.bboxW / 2, -sel.bboxH / 2);
+		mctx.restore();
+		const patchData = mctx.getImageData(unionX, unionY, unionW, unionH);
+		void imageDataToBase64Png(patchData).then(dataBase64 => {
+			if (!dataBase64) return;
+			const patch: ChatDrawingTilePatch = {
+				id: newStrokeId(),
+				x: unionX, y: unionY, width: unionW, height: unionH, dataBase64,
+				composite: 'source-over',
+			};
+			props.connection.send('drawTilePatch', { drawingId: props.drawingId, patch });
+		});
+	}
+
+	// "After" snapshot — current mainCanvas at union after the paste.
+	const mainAfterUnion = sel.mainSnapshot
+		? mctx.getImageData(unionX, unionY, unionW, unionH)
+		: null;
+
+	// Record a compound undo entry so Ctrl+Z reverses the whole lasso operation
+	// (vector deltas + raster paste) atomically.
+	const undoId = newLassoUndoId();
+	lassoUndoEntries.set(undoId, {
+		// All strokes added during the operation: outside fragments (from capture)
+		// + transformed copies (from commit). On undo all of them get removed.
+		addedStrokes: [...sel.outsideFragments, ...transformedAdded],
+		// Originals that were captured/split. On undo they go back into strokes[].
+		removedStrokes: sel.originalStrokes,
+		unionX, unionY, unionW, unionH,
+		mainBeforeUnion, mainAfterUnion,
+	});
+	myUndoStack.value.push(undoId);
+	myRedoStack.value = [];
+	while (myUndoStack.value.length > MAX_UNDO_HISTORY) {
+		const evicted = myUndoStack.value.shift();
+		if (evicted) {
+			strokePatches.delete(evicted);
+			mainRasterPatchHistory.delete(evicted);
+			lassoUndoEntries.delete(evicted);
+		}
+	}
+
+	lassoSelection.value = null;
+	rebuildVectorLayersFromStrokes();
+	snapshotBaselineFromLive();
+	recompositeDisplay();
+}
+
+// Restore the captured content back to its original position and drop the
+// selection. Used for Esc.
+function cancelLassoSelection() {
+	const sel = lassoSelection.value;
+	if (!sel) return;
+	// Uncut: the layers were never modified, just drop the floating polygon.
+	if (!sel.isCut) {
+		lassoSelection.value = null;
+		recompositeDisplay();
+		return;
+	}
+	// Restore vector strokes — drop outside fragments we'd added, re-insert originals.
+	const fragmentIds = new Set(sel.outsideFragments.map(f => f.id).filter((x): x is string => x != null));
+	strokes.value = strokes.value.filter(s => !s.id || !fragmentIds.has(s.id));
+	for (const orig of sel.originalStrokes) strokes.value.push(orig);
+
+	// Restore main raster from snapshot if we had one.
+	if (sel.mainSnapshot) {
+		const mctx = getLayerCtx('main');
+		mctx.putImageData(sel.mainSnapshot, sel.bboxX, sel.bboxY);
+	}
+
+	lassoSelection.value = null;
+	rebuildVectorLayersFromStrokes();
+	snapshotBaselineFromLive();
+	recompositeDisplay();
+}
+
+// Drop the selection without restoring — same as commit but without baking.
+// Handles main (already cleared from layer) and vector (already removed from
+// strokes[]) — we just need to broadcast the removals so peers match.
+function deleteLassoSelection() {
+	const sel = lassoSelection.value;
+	if (!sel) return;
+	// Explicit destructive action — discard floating-redo history.
+	clearLassoFloatingRedo();
+	// Uncut: nothing has been lifted, so "delete" really means "perform the
+	// cut and then drop the lifted content". Run performLassoCut first so
+	// downstream code has the broadcasts / hole / strokes[] mutations to do.
+	if (!sel.isCut) {
+		performLassoCut(sel);
+	}
+
+	// Broadcast removals for the original vector strokes (peers drop them).
+	for (const id of sel.removedOriginalIds) {
+		props.connection.send('drawUndo', { drawingId: props.drawingId, strokeId: id });
+	}
+	// Broadcast outside fragments (peers see the split originals' surviving parts).
+	for (const f of sel.outsideFragments) {
+		props.connection.send('drawStroke', { drawingId: props.drawingId, stroke: f });
+	}
+	// Broadcast a tile patch for the lifted main bbox so peers see the hole.
+	if (sel.rasterCanvas) {
+		const mctx = getLayerCtx('main');
+		const patchData = mctx.getImageData(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
+		void imageDataToBase64Png(patchData).then(dataBase64 => {
+			if (!dataBase64) return;
+			const patch: ChatDrawingTilePatch = {
+				id: newStrokeId(),
+				x: sel.bboxX, y: sel.bboxY, width: sel.bboxW, height: sel.bboxH, dataBase64,
+				composite: 'source-over',
+			};
+			props.connection.send('drawTilePatch', { drawingId: props.drawingId, patch });
+		});
+	}
+
+	lassoSelection.value = null;
+	rebuildVectorLayersFromStrokes();
+	snapshotBaselineFromLive();
+	recompositeDisplay();
+}
+
+// Hit-test for the floating selection. Returns the drag mode if the pointer
+// landed on a handle / inside the bbox; null otherwise. `x, y` are canvas-px.
+function lassoHitTest(x: number, y: number): LassoDragMode | null {
+	const sel = lassoSelection.value;
+	if (!sel) return null;
+	const cx = sel.bboxX + sel.bboxW / 2;
+	const cy = sel.bboxY + sel.bboxH / 2;
+	// Inverse-transform the pointer into the selection's local frame so the
+	// hit test works regardless of current rotation/scale.
+	const dx = x - (cx + sel.tx);
+	const dy = y - (cy + sel.ty);
+	const cos = Math.cos(-sel.rotation);
+	const sin = Math.sin(-sel.rotation);
+	const lx = (dx * cos - dy * sin) / sel.scale + cx;
+	const ly = (dx * sin + dy * cos) / sel.scale + cy;
+	// hit radius in selection-local pixels — generous so handles aren't fiddly
+	const HANDLE = 14 / sel.scale;
+	// how far above the bbox top edge the rotate handle is positioned
+	const ROTATE_OFFSET = 30 / sel.scale;
+
+	// Rotate handle: above the bbox top edge, at horizontal centre.
+	const rhx = sel.bboxX + sel.bboxW / 2;
+	const rhy = sel.bboxY - ROTATE_OFFSET;
+	if ((lx - rhx) ** 2 + (ly - rhy) ** 2 <= HANDLE * HANDLE) return 'rotate';
+
+	// Corner handles: any of the 4 bbox corners.
+	for (const [hx, hy] of [
+		[sel.bboxX, sel.bboxY],
+		[sel.bboxX + sel.bboxW, sel.bboxY],
+		[sel.bboxX, sel.bboxY + sel.bboxH],
+		[sel.bboxX + sel.bboxW, sel.bboxY + sel.bboxH],
+	]) {
+		if ((lx - hx) ** 2 + (ly - hy) ** 2 <= HANDLE * HANDLE) return 'scale';
+	}
+
+	// Inside the bbox: drag-to-move.
+	if (lx >= sel.bboxX && lx <= sel.bboxX + sel.bboxW
+		&& ly >= sel.bboxY && ly <= sel.bboxY + sel.bboxH) return 'move';
+
+	return null;
 }
 
 // Each redrawAll gets a fresh epoch; in-flight chunked replays check it on every frame
@@ -2408,7 +3631,7 @@ function updateBrushCursor(ev: PointerEvent) {
 }
 
 function onCanvasPointerMove(ev: PointerEvent) {
-	if (panState) {
+	if (panState || handPointers.has(ev.pointerId)) {
 		updateHandDrag(ev);
 		return;
 	}
@@ -2518,13 +3741,12 @@ function pickColorAt(nx: number, ny: number): string | null {
 	}
 }
 
-// Hand-tool drag session. mode = 'pan' (default) or 'rotate' (held-shift at start). The
-// mode is captured at pointerdown so releasing/pressing shift mid-drag doesn't switch.
+// Hand-tool drag — Mouse+Shift only. Single-pointer rotation pivoted on the canvas
+// centre (legacy desktop behavior). Multi-touch and the default no-modifier drag go
+// through `handPointers` / `handGesture` below so pinch + twist + pan all compose.
 let panState: null | {
 	pointerId: number;
-	mode: 'pan' | 'rotate';
-	startClientX: number;
-	startClientY: number;
+	mode: 'rotate';
 	startPanX: number;
 	startPanY: number;
 	startRotation: number;
@@ -2533,47 +3755,210 @@ let panState: null | {
 	startAngle: number;
 } = null;
 
+// Multi-pointer hand-tool state. Each tracked pointer keeps its current client
+// position; the gesture snapshot is rebuilt every time a pointer is added or
+// removed so the canvas stays put while the gesture frame redefines itself.
+const handPointers = new Map<number, { clientX: number; clientY: number }>();
+let handGesture: null | {
+	startCentroidX: number;
+	startCentroidY: number;
+	startDistance: number;
+	startAngle: number;
+	startPanX: number;
+	startPanY: number;
+	startZoom: number;
+	startRotation: number;
+} = null;
+
 function startHandDrag(ev: PointerEvent) {
 	const c = canvasEl.value;
 	if (!c) return;
-	const rect = c.getBoundingClientRect();
-	const pivotX = (rect.left + rect.right) / 2;
-	const pivotY = (rect.top + rect.bottom) / 2;
-	panState = {
-		pointerId: ev.pointerId,
-		mode: ev.shiftKey ? 'rotate' : 'pan',
-		startClientX: ev.clientX,
-		startClientY: ev.clientY,
-		startPanX: panX.value,
-		startPanY: panY.value,
-		startRotation: rotation.value,
-		pivotX,
-		pivotY,
-		startAngle: Math.atan2(ev.clientY - pivotY, ev.clientX - pivotX),
-	};
-	panActive.value = true;
-	c.setPointerCapture(ev.pointerId);
+	// Mouse + Shift: legacy keyboard-driven rotation around the canvas centre.
+	// Single-pointer; bypasses the multi-touch path so the pivot is fixed.
+	if (handPointers.size === 0 && !panState && ev.pointerType === 'mouse' && ev.shiftKey) {
+		const rect = c.getBoundingClientRect();
+		const pivotX = (rect.left + rect.right) / 2;
+		const pivotY = (rect.top + rect.bottom) / 2;
+		panState = {
+			pointerId: ev.pointerId,
+			mode: 'rotate',
+			startPanX: panX.value,
+			startPanY: panY.value,
+			startRotation: rotation.value,
+			pivotX,
+			pivotY,
+			startAngle: Math.atan2(ev.clientY - pivotY, ev.clientX - pivotX),
+		};
+		panActive.value = true;
+		try { c.setPointerCapture(ev.pointerId); } catch { /* noop */ }
+		return;
+	}
+	// Touch / pen / unmodified mouse: track the pointer and (re)build the gesture
+	// snapshot. Capture per-pointer so the drag survives leaving the canvas bounds;
+	// multi-pointer capture works because each pointer is captured independently.
+	try { c.setPointerCapture(ev.pointerId); } catch { /* noop */ }
+	handPointers.set(ev.pointerId, { clientX: ev.clientX, clientY: ev.clientY });
+	rebuildHandGesture();
 }
 
 function updateHandDrag(ev: PointerEvent) {
-	if (!panState || ev.pointerId !== panState.pointerId) return;
-	if (panState.mode === 'rotate') {
+	if (panState && ev.pointerId === panState.pointerId) {
 		const ang = Math.atan2(ev.clientY - panState.pivotY, ev.clientX - panState.pivotX);
 		const deltaDeg = (ang - panState.startAngle) * 180 / Math.PI;
 		rotation.value = panState.startRotation + deltaDeg;
 		return;
 	}
-	// Pan: drag delta is applied 1:1 in screen-space — the canvas tracks the pointer
-	// regardless of rotation, and there's no clamping so it can go off-viewport.
-	panX.value = panState.startPanX + (ev.clientX - panState.startClientX);
-	panY.value = panState.startPanY + (ev.clientY - panState.startClientY);
+	const tracked = handPointers.get(ev.pointerId);
+	if (!tracked) return;
+	tracked.clientX = ev.clientX;
+	tracked.clientY = ev.clientY;
+	applyHandGesture();
 }
 
 function endHandDrag(ev: PointerEvent) {
-	if (!panState || ev.pointerId !== panState.pointerId) return;
-	try { canvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
-	panState = null;
-	panActive.value = false;
+	if (panState && ev.pointerId === panState.pointerId) {
+		try { canvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
+		panState = null;
+		panActive.value = false;
+		return;
+	}
+	if (handPointers.has(ev.pointerId)) {
+		try { canvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
+		handPointers.delete(ev.pointerId);
+		rebuildHandGesture();
+	}
+}
+
+// Re-snapshot pan/zoom/rotation against the current pointer set. Called on every
+// pointerdown/up while the hand tool has any active pointers, so transitioning
+// 1↔2 fingers doesn't cause a discontinuity — the canvas stays at its current
+// state and the new pointer geometry becomes the new reference frame.
+function rebuildHandGesture() {
+	if (handPointers.size === 0) {
+		handGesture = null;
+		panActive.value = false;
+		return;
+	}
+	let cx = 0; let cy = 0;
+	for (const p of handPointers.values()) { cx += p.clientX; cy += p.clientY; }
+	cx /= handPointers.size;
+	cy /= handPointers.size;
+	let dist = 0; let ang = 0;
+	if (handPointers.size >= 2) {
+		const pts = Array.from(handPointers.values()).slice(0, 2);
+		const dx = pts[1].clientX - pts[0].clientX;
+		const dy = pts[1].clientY - pts[0].clientY;
+		dist = Math.hypot(dx, dy);
+		ang = Math.atan2(dy, dx);
+	}
+	handGesture = {
+		startCentroidX: cx,
+		startCentroidY: cy,
+		startDistance: dist,
+		startAngle: ang,
+		startPanX: panX.value,
+		startPanY: panY.value,
+		startZoom: zoom.value,
+		startRotation: rotation.value,
+	};
+	panActive.value = true;
+}
+
+function applyHandGesture() {
+	if (!handGesture) return;
+	let cx = 0; let cy = 0;
+	for (const p of handPointers.values()) { cx += p.clientX; cy += p.clientY; }
+	cx /= handPointers.size;
+	cy /= handPointers.size;
+
+	// Single pointer (or degenerate two-pointer with zero start distance): just
+	// translate the canvas by the centroid drift. No zoom/rotation change.
+	if (handPointers.size < 2 || handGesture.startDistance === 0) {
+		panX.value = handGesture.startPanX + (cx - handGesture.startCentroidX);
+		panY.value = handGesture.startPanY + (cy - handGesture.startCentroidY);
+		return;
+	}
+
+	// Two-finger gesture: pinch ratio drives zoom, twist drives rotation, and
+	// the centroid drift drives pan. Composed so the canvas point under the
+	// start centroid stays fixed (matching the standard tablet feel). The first
+	// two pointers in iteration order define the gesture frame; further pointers
+	// are ignored for zoom/rotation.
+	const pts = Array.from(handPointers.values()).slice(0, 2);
+	const dx = pts[1].clientX - pts[0].clientX;
+	const dy = pts[1].clientY - pts[0].clientY;
+	const dist = Math.hypot(dx, dy);
+	const ang = Math.atan2(dy, dx);
+
+	const newZoom = clampZoom(handGesture.startZoom * (dist / handGesture.startDistance));
+	const scaleFactor = newZoom / handGesture.startZoom;
+	const angleDelta = ang - handGesture.startAngle;
+
+	const cont = canvasContainerEl.value;
+	if (!cont) return;
+	const contRect = cont.getBoundingClientRect();
+	const containerCx = (contRect.left + contRect.right) / 2;
+	const containerCy = (contRect.top + contRect.bottom) / 2;
+
+	// Old canvas centre in screen space (panX/Y is offset from container centre).
+	// Apply scale + rotation around the start centroid, then translate by the
+	// centroid drift to land the new pan.
+	const oldCentreX = containerCx + handGesture.startPanX;
+	const oldCentreY = containerCy + handGesture.startPanY;
+	const offsetX = oldCentreX - handGesture.startCentroidX;
+	const offsetY = oldCentreY - handGesture.startCentroidY;
+	const cosA = Math.cos(angleDelta);
+	const sinA = Math.sin(angleDelta);
+	const newOffsetX = scaleFactor * (offsetX * cosA - offsetY * sinA);
+	const newOffsetY = scaleFactor * (offsetX * sinA + offsetY * cosA);
+	const newCentreX = handGesture.startCentroidX + newOffsetX + (cx - handGesture.startCentroidX);
+	const newCentreY = handGesture.startCentroidY + newOffsetY + (cy - handGesture.startCentroidY);
+
+	panX.value = newCentreX - containerCx;
+	panY.value = newCentreY - containerCy;
+	zoom.value = newZoom;
+	rotation.value = handGesture.startRotation + angleDelta * 180 / Math.PI;
+}
+
+// Rotation handle drag session (hand-tool only). Pivot is the visual centre of the canvas
+// so dragging around the dial rotates the view around the same point as Shift+drag.
+let rotateHandleState: null | {
+	pointerId: number;
+	pivotX: number;
+	pivotY: number;
+	startAngle: number;
+	startRotation: number;
+} = null;
+
+function onRotateHandlePointerDown(ev: PointerEvent) {
+	const c = canvasEl.value;
+	if (!c) return;
+	ev.preventDefault();
+	ev.stopPropagation();
+	const rect = c.getBoundingClientRect();
+	const pivotX = (rect.left + rect.right) / 2;
+	const pivotY = (rect.top + rect.bottom) / 2;
+	rotateHandleState = {
+		pointerId: ev.pointerId,
+		pivotX,
+		pivotY,
+		startAngle: Math.atan2(ev.clientY - pivotY, ev.clientX - pivotX),
+		startRotation: rotation.value,
+	};
+	(ev.currentTarget as Element).setPointerCapture?.(ev.pointerId);
+}
+
+function onRotateHandlePointerMove(ev: PointerEvent) {
+	if (!rotateHandleState || ev.pointerId !== rotateHandleState.pointerId) return;
+	const ang = Math.atan2(ev.clientY - rotateHandleState.pivotY, ev.clientX - rotateHandleState.pivotX);
+	const deltaDeg = (ang - rotateHandleState.startAngle) * 180 / Math.PI;
+	rotation.value = rotateHandleState.startRotation + deltaDeg;
+}
+
+function onRotateHandlePointerUp(ev: PointerEvent) {
+	if (!rotateHandleState || ev.pointerId !== rotateHandleState.pointerId) return;
+	try { (ev.currentTarget as Element).releasePointerCapture?.(ev.pointerId); } catch { /* noop */ }
+	rotateHandleState = null;
 }
 
 function onPointerDown(ev: PointerEvent) {
@@ -2589,6 +3974,37 @@ function onPointerDown(ev: PointerEvent) {
 	}
 
 	const point = canvasPointToNormalized(ev);
+
+	// Lasso tool: either drag a handle on the floating selection, or start
+	// drawing a new polygon. If a selection is active and the pointer landed
+	// outside it, commit the current selection first so the next lasso draws
+	// on the freshly-baked layers.
+	if (tool.value === 'lasso') {
+		const cx = point[0] * CANVAS_W;
+		const cy = point[1] * CANVAS_H;
+		if (lassoSelection.value) {
+			const hit = lassoHitTest(cx, cy);
+			if (hit) {
+				canvasEl.value?.setPointerCapture(ev.pointerId);
+				lassoDrag = {
+					mode: hit,
+					pointerId: ev.pointerId,
+					startX: cx, startY: cy,
+					startTx: lassoSelection.value.tx,
+					startTy: lassoSelection.value.ty,
+					startRotation: lassoSelection.value.rotation,
+					startScale: lassoSelection.value.scale,
+				};
+				return;
+			}
+			// Click outside the selection — commit and start a fresh polygon at this point.
+			commitLassoSelection();
+		}
+		canvasEl.value?.setPointerCapture(ev.pointerId);
+		lassoDrawingPolygon.value = [[cx, cy]];
+		recompositeDisplay();
+		return;
+	}
 
 	// Alt+click on any tool acts as a spoit for one shot.
 	if (tool.value === 'spoit' || ev.altKey) {
@@ -2652,18 +4068,40 @@ function onPointerDown(ev: PointerEvent) {
 		startPaintLive(layerForStroke);
 	}
 
-	rawBuffer = [point];
-	currentPoints = [point];
+	// ペン (筆圧検知 ON) は描きはじめの瞬間を必ず筆圧 0 で開始する。生筆圧で
+	// 始めると入りが太いまま線が始まりテーパーが効かないので、0 から始めて
+	// 後続サンプルが窓平均に積まれるにつれて自然に太くなる入りを作る。
+	// 筆圧検知 OFF のときは均一線を期待されているのでこの処理はスキップ。
+	const startPoint: [number, number, number] = tool.value === 'pen' && pressureSensitivity.value
+		? [point[0], point[1], 0]
+		: point;
+	rawBuffer = [startPoint];
+	currentPoints = [startPoint];
+	// 新しいストロークの開始ごとに筆圧の窓と累積パス長、カーブ平滑化状態をリセット。
+	resetPressureSmoothing();
+	resetPenCurve();
+	resetRecentSamples();
+	pushRecentSample(point[0], point[1]);
+	strokePathLength = 0;
+	// pen+筆圧検知 ON では合成 0 を窓に入れない (= 入りの taper はパス長ベース
+	// で別途実施)。それ以外は実筆圧をそのまま窓に投入する。
+	if (!(tool.value === 'pen' && pressureSensitivity.value)) {
+		pushPressureSample(startPoint[2]);
+	}
 	// Stamp the initial dot so a tap/click without movement still leaves a mark.
-	if (usesBrushBuffer) {
-		const ix = point[0] * CANVAS_W;
-		const iy = point[1] * CANVAS_H;
-		const ipr = point[2];
+	// pen+筆圧検知 ON はストローク始点が筆圧 0 で見えないこと、かつ初期ドットを
+	// 経由すると penCurveHasLastMid が立って次の penPaintLive が「初期ドットの
+	// 中点 → 入力点」のおかしな二次ベジエを描いてしまうため、初期ドットはスキ
+	// ップしてカーブ状態をクリーンに保つ。
+	if (usesBrushBuffer && !(tool.value === 'pen' && pressureSensitivity.value)) {
+		const ix = startPoint[0] * CANVAS_W;
+		const iy = startPoint[1] * CANVAS_H;
+		const ipr = startPoint[2];
 		const [pr, pg, pbb, palpha] = parseColorRGBA(composedColor.value);
 		const opaque = `rgb(${pr},${pg},${pbb})`;
 		const clip = effectiveClipForNewStroke();
 		const alpha = palpha / 255;
-		brushBufferStamp(ix, iy, ix + 0.01, iy + 0.01, ipr, opaque, alpha, clip);
+		brushBufferStamp(ix, iy, ix + 0.01, iy + 0.01, ipr, ipr, opaque, alpha, clip);
 		recompositeDisplay();
 	} else if (usesMixer) {
 		// Mixer's "stamp" at pointer-down samples and draws a single dot at the start.
@@ -2713,6 +4151,64 @@ function drawLinePreview(start: [number, number, number], end: [number, number, 
 }
 
 function onPointerMove(ev: PointerEvent) {
+	// Lasso runs through its own move handler — it doesn't go through the
+	// `isDrawingStroke` flag because a transform-drag isn't a stroke.
+	if (tool.value === 'lasso') {
+		const p = canvasPointToNormalized(ev);
+		const cx = p[0] * CANVAS_W;
+		const cy = p[1] * CANVAS_H;
+		// Building a new polygon — append the live point.
+		if (lassoDrawingPolygon.value && (!lassoDrag || lassoDrag.pointerId !== ev.pointerId)) {
+			const poly = lassoDrawingPolygon.value;
+			const last = poly[poly.length - 1];
+			// Skip near-duplicate points to keep the polygon tractable for clipping.
+			if (Math.hypot(cx - last[0], cy - last[1]) >= 1.5) {
+				poly.push([cx, cy]);
+				recompositeDisplay();
+			}
+			return;
+		}
+		// Transform-dragging a captured selection.
+		if (lassoDrag && lassoSelection.value && ev.pointerId === lassoDrag.pointerId) {
+			const sel = lassoSelection.value;
+			const dx = cx - lassoDrag.startX;
+			const dy = cy - lassoDrag.startY;
+			// Lazy cut — perform the actual stroke split + raster lift only when
+			// the user starts moving the selection. A pure click-without-drag
+			// leaves the underlying layers intact.
+			if (!sel.isCut && (Math.abs(dx) > 0 || Math.abs(dy) > 0)) {
+				performLassoCut(sel);
+				rebuildVectorLayersFromStrokes();
+				snapshotBaselineFromLive();
+				// New manual transform invalidates the floating redo stack.
+				clearLassoFloatingRedo();
+			}
+			if (lassoDrag.mode === 'move') {
+				sel.tx = lassoDrag.startTx + dx;
+				sel.ty = lassoDrag.startTy + dy;
+			} else if (lassoDrag.mode === 'scale') {
+				// Uniform scale based on distance from the bbox centre. Bigger pull = bigger.
+				const ccx = sel.bboxX + sel.bboxW / 2 + lassoDrag.startTx;
+				const ccy = sel.bboxY + sel.bboxH / 2 + lassoDrag.startTy;
+				const startDist = Math.hypot(lassoDrag.startX - ccx, lassoDrag.startY - ccy);
+				const nowDist = Math.hypot(cx - ccx, cy - ccy);
+				if (startDist > 1) {
+					const factor = nowDist / startDist;
+					sel.scale = Math.max(0.05, Math.min(20, lassoDrag.startScale * factor));
+				}
+			} else {
+				// 'rotate' — the only mode left after move/scale.
+				const ccx = sel.bboxX + sel.bboxW / 2 + lassoDrag.startTx;
+				const ccy = sel.bboxY + sel.bboxH / 2 + lassoDrag.startTy;
+				const startAng = Math.atan2(lassoDrag.startY - ccy, lassoDrag.startX - ccx);
+				const nowAng = Math.atan2(cy - ccy, cx - ccx);
+				sel.rotation = lassoDrag.startRotation + (nowAng - startAng);
+			}
+			recompositeDisplay();
+			return;
+		}
+	}
+
 	if (!isDrawingStroke || ev.pointerId !== activePointerId) return;
 	const p = canvasPointToNormalized(ev);
 
@@ -2732,17 +4228,55 @@ function onPointerMove(ev: PointerEvent) {
 		return;
 	}
 
+	// High-frequency input (pen tablets, fine touch) is coalesced by the OS into one
+	// pointermove per frame — getCoalescedEvents exposes the missed sub-frame samples.
+	// Iterating them gives the brush engine native-rate samples, which makes diagonal
+	// strokes and pressure ramps at stroke-start visibly smoother.
+	const samples = (typeof ev.getCoalescedEvents === 'function' ? ev.getCoalescedEvents() : null);
+	let drewAnySegment = false;
+	if (samples && samples.length > 0) {
+		for (const e of samples) {
+			if (processBrushSample(e)) drewAnySegment = true;
+		}
+	} else if (processBrushSample(ev)) {
+		drewAnySegment = true;
+	}
+	if (drewAnySegment) recompositeDisplay();
+}
+
+// Returns true if a segment was drawn (caller batches recompositeDisplay).
+function processBrushSample(ev: PointerEvent): boolean {
+	const p = canvasPointToNormalized(ev);
+	// 筆圧の窓平均を毎サンプル更新。位置スタビライザの出力に上書きすることで
+	// smoothing スライダの値に関係なく筆圧ノイズを常時抑止する。
+	pushPressureSample(p[2]);
+	// 終端速度推定用に最近サンプルもタイムスタンプ付きで保持。
+	pushRecentSample(p[0], p[1]);
 	rawBuffer.push(p);
 	const next = consumeStabilized();
-	if (!next) return;
+	if (!next) return false;
+	// 位置は次サンプル基準のまま、筆圧だけ平滑化した値に差し替える。
+	next[2] = currentSmoothedPressure();
 
 	const last = currentPoints[currentPoints.length - 1];
 	const dx = (next[0] - last[0]) * CANVAS_W;
 	const dy = (next[1] - last[1]) * CANVAS_H;
-	if (dx * dx + dy * dy < 1) return;
+	if (dx * dx + dy * dy < 1) return false;
+
+	// 累積パス長を更新し、pen+筆圧検知 ON のときは「最初の TAPER_IN px」の間
+	// smoothstep カーブで筆圧をランプアップ (距離ベースなのでサンプルレートや
+	// スタビライザの遅延に左右されない)。線形ランプだと taper 終端で線幅増加率
+	// が不連続になり「角」として見えるが、smoothstep は両端で導関数が 0 になる
+	// ため C1 連続でテーパー終わりがふんわり繋がる。
+	strokePathLength += Math.sqrt(dx * dx + dy * dy);
+	if (tool.value === 'pen' && pressureSensitivity.value) {
+		const TAPER_IN = Math.max(8, activeBrushWidth.value * 1.5);
+		const tt = Math.min(1, strokePathLength / TAPER_IN);
+		const taperFactor = tt * tt * (3 - 2 * tt);
+		next[2] = next[2] * taperFactor;
+	}
 
 	const avgP = (last[2] + next[2]) / 2;
-	const c = getLayerCtx(preStrokeLayerTarget ?? currentLayer.value);
 	const ax = last[0] * CANVAS_W;
 	const ay = last[1] * CANVAS_H;
 	const bx = next[0] * CANVAS_W;
@@ -2752,18 +4286,17 @@ function onPointerMove(ev: PointerEvent) {
 		const opaque = `rgb(${pr},${pg},${pbb})`;
 		const clip = effectiveClipForNewStroke();
 		const alpha = palpha / 255;
-		brushBufferStamp(ax, ay, bx, by, avgP, opaque, alpha, clip);
-		recompositeDisplay();
+		brushBufferStamp(ax, ay, bx, by, last[2], next[2], opaque, alpha, clip);
 		currentPoints.push(next);
-		return;
+		return true;
 	}
 	if (tool.value === 'mixer') {
 		mixerDrawSegment(ax, ay, bx, by, avgP);
-		recompositeDisplay();
 		currentPoints.push(next);
-		return;
+		return true;
 	}
 	// Eraser only path — alpha 1 destination-out, no bead artefact possible.
+	const c = getLayerCtx(preStrokeLayerTarget ?? currentLayer.value);
 	c.save();
 	c.lineCap = 'round';
 	c.lineJoin = 'round';
@@ -2776,16 +4309,36 @@ function onPointerMove(ev: PointerEvent) {
 	c.lineTo(next[0] * CANVAS_W, next[1] * CANVAS_H);
 	c.stroke();
 	c.restore();
-	recompositeDisplay();
-
 	currentPoints.push(next);
+	return true;
 }
 
 function onPointerUp(ev: PointerEvent) {
-	if (panState && ev.pointerId === panState.pointerId) {
+	if ((panState && ev.pointerId === panState.pointerId) || handPointers.has(ev.pointerId)) {
 		endHandDrag(ev);
 		return;
 	}
+
+	// Lasso lifecycle: finish polygon-draw OR end transform-drag.
+	if (tool.value === 'lasso') {
+		try { canvasEl.value?.releasePointerCapture(ev.pointerId); } catch { /* noop */ }
+		// End transform-drag (no capture phase to start).
+		if (lassoDrag && lassoDrag.pointerId === ev.pointerId) {
+			lassoDrag = null;
+			return;
+		}
+		// Close polygon — append final point and capture.
+		if (lassoDrawingPolygon.value) {
+			const poly = lassoDrawingPolygon.value;
+			const p = canvasPointToNormalized(ev);
+			poly.push([p[0] * CANVAS_W, p[1] * CANVAS_H]);
+			lassoDrawingPolygon.value = null;
+			captureLassoSelection(poly);
+			return;
+		}
+		return;
+	}
+
 	if (!isDrawingStroke || ev.pointerId !== activePointerId) return;
 	isDrawingStroke = false;
 	activePointerId = null;
@@ -2847,7 +4400,16 @@ function onPointerUp(ev: PointerEvent) {
 
 	// Flush any un-averaged tail so the visible stroke lands on the actual pointer end.
 	const tail = flushStabilizerTail();
-	for (const next of tail) {
+	const finalSmoothed = currentSmoothedPressure();
+	// ペン (筆圧検知 ON) は描き終わりの瞬間も筆圧 0 に強制 (始端と対称)。最後
+	// の tail サンプルだけ 0 に置き換え、手前の tail サンプルは finalSmoothed
+	// を維持。結果: 最終 segment が radiusA=finalSmoothed → radiusB=0 で arc+fill
+	// 補間され、終端が自然に 0 へテーパーアウトする。
+	const taperEndZero = tool.value === 'pen' && pressureSensitivity.value;
+	for (let ti = 0; ti < tail.length; ti++) {
+		const next = tail[ti];
+		const isLastTail = ti === tail.length - 1;
+		next[2] = (taperEndZero && isLastTail) ? 0 : finalSmoothed;
 		if (currentPoints.length === 0) { currentPoints.push(next); continue; }
 		const last = currentPoints[currentPoints.length - 1];
 		const dx = (next[0] - last[0]) * CANVAS_W;
@@ -2864,7 +4426,7 @@ function onPointerUp(ev: PointerEvent) {
 			const opaque = `rgb(${pr},${pg},${pbb})`;
 			const clip = effectiveClipForNewStroke();
 			const alpha = palpha / 255;
-			brushBufferStamp(ax, ay, bx, by, avgP, opaque, alpha, clip);
+			brushBufferStamp(ax, ay, bx, by, last[2], next[2], opaque, alpha, clip);
 			currentPoints.push(next);
 			continue;
 		}
@@ -2886,6 +4448,15 @@ function onPointerUp(ev: PointerEvent) {
 		c.stroke();
 		c.restore();
 		currentPoints.push(next);
+	}
+	// pen のカーブ平滑化は最後の中点で止まっているので、最終的な「最後の中点
+	// → 最後の入力点」直線を描いて stroke を完結させる。
+	if (tool.value === 'pen') {
+		const [pr, pg, pbb, palpha] = parseColorRGBA(composedColor.value);
+		const opaque = `rgb(${pr},${pg},${pbb})`;
+		const clip = effectiveClipForNewStroke();
+		const alpha = palpha / 255;
+		finishPenCurve(opaque, alpha, clip);
 	}
 	recompositeDisplay();
 	rawBuffer = [];
@@ -2909,6 +4480,29 @@ function onPointerUp(ev: PointerEvent) {
 	const commitLayer = preStrokeLayerTarget ?? currentLayer.value;
 	const commitClip = effectiveClipForNewStroke() && commitTool !== 'eraser';
 	const commitStrokeId = newStrokeId();
+
+	// 「払い」(harai) — 終端速度がしきい値超のとき、終端から taperLen 分だけ
+	// 筆圧を 0 にスケールダウンして再描画する。勢いよく描き終えた線ほど長く
+	// 細くなり、ゆっくり止めた線はそのまま太く終わる。
+	let haraiApplied = false;
+	if (commitTool === 'pen' && pressureSensitivity.value && currentPoints.length >= 2) {
+		const v = computeEndVelocity();
+		const HARAI_THRESHOLD = 500;
+		const HARAI_FACTOR = 0.1;
+		const HARAI_MAX_LEN = 120;
+		if (v > HARAI_THRESHOLD) {
+			const taperLen = Math.min(HARAI_MAX_LEN, (v - HARAI_THRESHOLD) * HARAI_FACTOR);
+			if (taperLen > 0) {
+				applyHaraiTaper(currentPoints, taperLen);
+				if (preStrokeLayerSnapshot && preStrokeLayerTarget) {
+					const layerCtx = getLayerCtx(preStrokeLayerTarget);
+					layerCtx.putImageData(preStrokeLayerSnapshot, 0, 0);
+				}
+				haraiApplied = true;
+			}
+		}
+	}
+
 	const stroke: ChatDrawingStroke = {
 		id: commitStrokeId,
 		points: currentPoints,
@@ -2920,6 +4514,13 @@ function onPointerUp(ev: PointerEvent) {
 		...(commitTool === 'airbrush' ? { hardness: airbrushHardness.value, ...(airbrushShowCore.value ? { core: true } : {}) } : {}),
 	};
 	currentPoints = [];
+
+	if (haraiApplied) {
+		// preStrokeLayerSnapshot を putImageData で書き戻したので、harai 適用後の
+		// points で stroke 全体を再描画して commit 前のレイヤを正しい姿に戻す。
+		renderStroke(stroke);
+		recompositeDisplay();
+	}
 
 	if (commitLayer === 'main') {
 		// Pixels are already on mainCanvas (via paintLiveDrawSegment for pen/airbrush, or
@@ -3083,11 +4684,15 @@ function clearAll() {
 	props.connection.send('drawClear', { drawingId: props.drawingId });
 }
 
-const currentLayerLabel = computed(() => {
-	if (currentLayer.value === 'draft') return '下描きレイヤー';
-	if (currentLayer.value === 'lineart') return '線画レイヤー';
-	return '塗りレイヤー';
-});
+// Static list of layers, ordered top → bottom of the panel. Each option drives
+// one row in the layer-list UI; the active row is highlighted so it's obvious
+// which layer the next stroke targets — no more "only the non-default ones
+// look active" confusion.
+const layerOptions = [
+	{ value: 'lineart' as const, label: '線画', icon: 'ti-pen' },
+	{ value: 'main' as const, label: '塗り', icon: 'ti-paint' },
+	{ value: 'draft' as const, label: '下描き', icon: 'ti-pencil' },
+];
 
 // Layer cycling is disabled while a main-only tool (fill / airbrush) is active.
 // The watcher on `tool` keeps `currentLayer` pinned to 'main' in that case, so this
@@ -3112,12 +4717,18 @@ const hasToolParams = computed(() => (
 	|| tool.value === 'dodge'
 ));
 
-function toggleLayer() {
-	// main → 下描き → 線画 → main
-	if (currentLayer.value === 'main') currentLayer.value = 'draft';
-	else if (currentLayer.value === 'draft') currentLayer.value = 'lineart';
-	else currentLayer.value = 'main';
-}
+// Display name for the active tool, used as the section header above its
+// adjustable parameters in the right panel.
+const toolNameLabel = computed(() => {
+	switch (tool.value) {
+		case 'airbrush': return 'エアブラシ';
+		case 'watercolor': return '水彩';
+		case 'marker': return 'マーカー';
+		case 'mixer': return '指先';
+		case 'dodge': return '覆い焼き';
+		default: return '';
+	}
+});
 
 // If the user switches off main while a raster-only tool is selected, fall back to
 // pen so the toolbar selection stays consistent with what's now visible.
@@ -3159,6 +4770,18 @@ let brushWheelAccum = 0;
 // the cursor over the same pixel we move the canvas centre to (cursor - factor * offset_old).
 // Since canvasCentre = containerCentre + (panX, panY) and rotation leaves the centre fixed,
 // the new pan reduces to: pan_new = factor * pan_old + (1 - factor) * (cursor - containerCentre).
+// Step zoom from a UI button. Pivots on the container centre so the canvas centre
+// stays fixed — gives pen-tablet / touch users a wheel-free way to zoom.
+function zoomStep(factor: number) {
+	const cont = canvasContainerEl.value;
+	if (!cont) {
+		zoom.value = clampZoom(zoom.value * factor);
+		return;
+	}
+	const rect = cont.getBoundingClientRect();
+	zoomAtCursor((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2, factor);
+}
+
 function zoomAtCursor(clientX: number, clientY: number, factor: number) {
 	const oldZoom = zoom.value;
 	const newZoom = clampZoom(oldZoom * factor);
@@ -3222,8 +4845,107 @@ function removeStrokeById(strokeId: string): ChatDrawingStroke | null {
 }
 
 function undo() {
+	// While a lasso selection is still floating (transform-active, not yet
+	// committed), undo first reverts the in-progress transform back to the
+	// capture position (which also reverses any cut by restoring originals
+	// when the transform reset takes the selection back to uncut state). A
+	// second undo cancels the selection entirely. Doesn't consume an entry
+	// from the regular undo stack.
+	if (lassoSelection.value) {
+		const sel = lassoSelection.value;
+		const isMoved = sel.tx !== 0 || sel.ty !== 0 || sel.rotation !== 0 || sel.scale !== 1;
+		if (isMoved) {
+			// Push a redo entry capturing the current transform so a follow-up
+			// redo can replay it.
+			lassoFloatingRedoStack.push({
+				kind: 'transform-reset',
+				tx: sel.tx, ty: sel.ty, rotation: sel.rotation, scale: sel.scale,
+			});
+			// Reset the transform AND undo the cut so the layers go back to
+			// pre-lasso state. The polygon stays — second undo will drop it.
+			if (sel.isCut) {
+				const fragmentIds = new Set(sel.outsideFragments.map(f => f.id).filter((x): x is string => x != null));
+				strokes.value = strokes.value.filter(s => !s.id || !fragmentIds.has(s.id));
+				for (const orig of sel.originalStrokes) strokes.value.push(orig);
+				if (sel.mainSnapshot) {
+					getLayerCtx('main').putImageData(sel.mainSnapshot, sel.bboxX, sel.bboxY);
+				}
+				sel.isCut = false;
+				sel.rasterCanvas = null;
+				sel.vectorStrokes = [];
+				sel.removedOriginalIds = [];
+				sel.outsideFragments = [];
+				sel.mainSnapshot = null;
+				sel.originalStrokes = [];
+				rebuildVectorLayersFromStrokes();
+				snapshotBaselineFromLive();
+			}
+			sel.tx = 0;
+			sel.ty = 0;
+			sel.rotation = 0;
+			sel.scale = 1;
+			recompositeDisplay();
+			return;
+		}
+		// Push a redo entry that knows how to recreate this polygon, then drop
+		// the floating state. Subsequent redo will resurrect it (uncut).
+		lassoFloatingRedoStack.push({
+			kind: 'cancel',
+			polygon: sel.polygon,
+			bboxX: sel.bboxX, bboxY: sel.bboxY,
+			bboxW: sel.bboxW, bboxH: sel.bboxH,
+		});
+		cancelLassoSelection();
+		return;
+	}
+
 	const id = myUndoStack.value.pop();
 	if (!id) return;
+
+	// Lasso compound undo: reverses the entire lasso operation atomically —
+	// remove the strokes the commit added, re-insert the originals, and blit
+	// the pre-operation main pixels back. Peers are kept in sync with the
+	// matching drawUndo / drawStroke / drawTilePatch broadcasts.
+	const lassoEntry = lassoUndoEntries.get(id);
+	if (lassoEntry) {
+		const addedIds = new Set(lassoEntry.addedStrokes.map(s => s.id).filter((x): x is string => x != null));
+		strokes.value = strokes.value.filter(s => !s.id || !addedIds.has(s.id));
+		for (const orig of lassoEntry.removedStrokes) strokes.value.push(orig);
+		// Broadcast inverse: drop the added strokes, re-add the originals.
+		for (const aid of addedIds) {
+			props.connection.send('drawUndo', { drawingId: props.drawingId, strokeId: aid });
+		}
+		for (const orig of lassoEntry.removedStrokes) {
+			props.connection.send('drawStroke', { drawingId: props.drawingId, stroke: orig });
+		}
+		// Restore main raster from the pre-operation snapshot, then peers get
+		// a tile patch of the same region so they converge.
+		if (lassoEntry.mainBeforeUnion) {
+			const c = getLayerCtx('main');
+			c.putImageData(lassoEntry.mainBeforeUnion, lassoEntry.unionX, lassoEntry.unionY);
+			void imageDataToBase64Png(lassoEntry.mainBeforeUnion).then(dataBase64 => {
+				if (!dataBase64) return;
+				const patch: ChatDrawingTilePatch = {
+					x: lassoEntry.unionX,
+					y: lassoEntry.unionY,
+					width: lassoEntry.unionW,
+					height: lassoEntry.unionH,
+					dataBase64,
+					composite: 'source-over',
+				};
+				props.connection.send('drawTilePatch', { drawingId: props.drawingId, patch });
+			});
+		}
+		// Push a synthetic placeholder onto redoStack so redo() can retrieve
+		// the same entry (the entry stays in lassoUndoEntries until eviction
+		// via MAX_UNDO_HISTORY).
+		myRedoStack.value.push({ id, points: [], color: '#000000', width: 0, tool: 'pen', layer: 'main' });
+		rebuildVectorLayersFromStrokes();
+		snapshotBaselineFromLive();
+		recompositeDisplay();
+		return;
+	}
+
 	// Main-raster path: id is keyed in mainRasterPatchHistory rather than strokes[].
 	// Paint `before` back, broadcast a tile patch carrying the same pixels so peers
 	// converge on the rolled-back state, and stash the entry into the redo history.
@@ -3289,8 +5011,91 @@ const mainRasterRedoHistory = new Map<string, MainRasterPatch>();
 let mainRasterLoaded = false;
 
 function redo() {
+	// Floating-lasso redo takes precedence over the regular redo stack — it
+	// reverses the most recent undo step that targeted the active selection.
+	if (lassoFloatingRedoStack.length > 0) {
+		const entry = lassoFloatingRedoStack.pop();
+		if (!entry) return;
+		if (entry.kind === 'cancel') {
+			// Resurrect the polygon (uncut). Drops anything currently floating.
+			lassoSelection.value = {
+				polygon: entry.polygon,
+				bboxX: entry.bboxX, bboxY: entry.bboxY,
+				bboxW: entry.bboxW, bboxH: entry.bboxH,
+				rasterCanvas: null,
+				vectorStrokes: [],
+				removedOriginalIds: [],
+				outsideFragments: [],
+				mainSnapshot: null,
+				originalStrokes: [],
+				tx: 0, ty: 0,
+				rotation: 0,
+				scale: 1,
+				isCut: false,
+			};
+			recompositeDisplay();
+			return;
+		}
+		// 'transform-reset' — re-perform the cut and re-apply the saved transform.
+		const sel = lassoSelection.value;
+		if (!sel) return;
+		if (!sel.isCut) {
+			performLassoCut(sel);
+			rebuildVectorLayersFromStrokes();
+			snapshotBaselineFromLive();
+		}
+		sel.tx = entry.tx;
+		sel.ty = entry.ty;
+		sel.rotation = entry.rotation;
+		sel.scale = entry.scale;
+		recompositeDisplay();
+		return;
+	}
+
 	const stroke = myRedoStack.value.pop();
 	if (!stroke || !stroke.id) return;
+
+	// Lasso compound redo: the stroke is a synthetic placeholder; the real
+	// data is keyed by id in lassoUndoEntries (kept since undo). Re-apply
+	// the operation forward and re-push the id back onto the undo stack.
+	if (stroke.id.startsWith('lasso:')) {
+		const lassoEntry = lassoUndoEntries.get(stroke.id);
+		if (!lassoEntry) return;
+		// Drop the originals we'd just put back during undo, re-add the
+		// transformed/outside strokes that the commit had introduced.
+		const removedIds = new Set(lassoEntry.removedStrokes.map(s => s.id).filter((x): x is string => x != null));
+		strokes.value = strokes.value.filter(s => !s.id || !removedIds.has(s.id));
+		for (const added of lassoEntry.addedStrokes) strokes.value.push(added);
+		for (const rid of removedIds) {
+			props.connection.send('drawUndo', { drawingId: props.drawingId, strokeId: rid });
+		}
+		for (const added of lassoEntry.addedStrokes) {
+			props.connection.send('drawStroke', { drawingId: props.drawingId, stroke: added });
+		}
+		// Restore main raster from the post-operation snapshot.
+		if (lassoEntry.mainAfterUnion) {
+			const c = getLayerCtx('main');
+			c.putImageData(lassoEntry.mainAfterUnion, lassoEntry.unionX, lassoEntry.unionY);
+			void imageDataToBase64Png(lassoEntry.mainAfterUnion).then(dataBase64 => {
+				if (!dataBase64) return;
+				const patch: ChatDrawingTilePatch = {
+					x: lassoEntry.unionX,
+					y: lassoEntry.unionY,
+					width: lassoEntry.unionW,
+					height: lassoEntry.unionH,
+					dataBase64,
+					composite: 'source-over',
+				};
+				props.connection.send('drawTilePatch', { drawingId: props.drawingId, patch });
+			});
+		}
+		myUndoStack.value.push(stroke.id);
+		rebuildVectorLayersFromStrokes();
+		snapshotBaselineFromLive();
+		recompositeDisplay();
+		return;
+	}
+
 	// Main-raster redo: the stroke object is a synthetic placeholder; the real data is
 	// keyed in mainRasterRedoHistory. Paint `after` back, restore patch into the live
 	// history, and broadcast.
@@ -3348,6 +5153,39 @@ function onRemoteCursor(payload: { drawingId: string; userId: string; x: number;
 }
 
 function onKeyDown(ev: KeyboardEvent) {
+	// Lasso shortcuts take precedence when a selection is active. Skip them if
+	// focus is in a text field so users typing into the textbox tool don't trip
+	// Esc/Enter/Delete unintentionally.
+	if (lassoSelection.value || lassoDrawingPolygon.value) {
+		const target = ev.target as HTMLElement | null;
+		const inTextField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+		if (!inTextField) {
+			if (ev.key === 'Escape') {
+				ev.preventDefault();
+				if (lassoDrawingPolygon.value) {
+					lassoDrawingPolygon.value = null;
+					recompositeDisplay();
+				} else {
+					// Esc is an explicit "discard" — drop the floating-redo
+					// history too so a stray Ctrl+Y can't resurrect this state.
+					clearLassoFloatingRedo();
+					cancelLassoSelection();
+				}
+				return;
+			}
+			if (ev.key === 'Enter' && lassoSelection.value) {
+				ev.preventDefault();
+				commitLassoSelection();
+				return;
+			}
+			if ((ev.key === 'Delete' || ev.key === 'Backspace') && lassoSelection.value) {
+				ev.preventDefault();
+				deleteLassoSelection();
+				return;
+			}
+		}
+	}
+
 	if (!(ev.ctrlKey || ev.metaKey)) return;
 	const k = ev.key.toLowerCase();
 	if (k === 'z' && !ev.shiftKey) {
@@ -3440,8 +5278,24 @@ function closeWindow() {
 	windowEl.value?.close();
 }
 
+// iPad Safari のダブルタップ既定動作（スマートズーム / 由来のスクロール）抑止用。
+// 連続する 2 回目の touchend（≦ 350ms 以内）に対し preventDefault する。
+let lastTouchEndAt = 0;
+
+function onRootTouchEnd(ev: TouchEvent) {
+	const t = performance.now();
+	if (t - lastTouchEndAt < 350) {
+		ev.preventDefault();
+	}
+	lastTouchEndAt = t;
+}
+
 onMounted(async () => {
 	clearCanvas();
+	// Paint the colour wheel once on mount. The HSV watcher only fires on value
+	// changes, so without an initial draw the wheel canvas would render blank
+	// until the user moves a slider or clicks the picker.
+	void nextTick(() => requestAnimationFrame(drawWheel));
 	// Observe the canvas scroll container so display size tracks window resizes.
 	if (canvasContainerEl.value) {
 		resizeObserver = new ResizeObserver(entries => {
@@ -3459,7 +5313,16 @@ onMounted(async () => {
 	props.connection.on('drawUndo', onRemoteUndo);
 	props.connection.on('drawingCursor', onRemoteCursor);
 	window.addEventListener('keydown', onKeyDown);
-	window.addEventListener('mousedown', closeColorPopoverOnOutside);
+
+	// iPad Safari でダブルタップが「スマートズーム / スクロール」として解釈され、
+	// MkWindow 配下の表示位置がずれて画面下部に黒い隙間が出る問題への対策。
+	// CSS の `touch-action: manipulation` だけでは抑止しきれないケースがあるため、
+	// touchend の 2 回目（≦ 350ms 以内）について preventDefault してブラウザの
+	// 既定アクション（ズーム／フォーカス由来のスクロール）を打ち切る。
+	// 描画は pointer events 経由なので preventDefault しても影響しない。
+	if (rootEl.value) {
+		rootEl.value.addEventListener('touchend', onRootTouchEnd, { passive: false });
+	}
 
 	try {
 		const fresh = await apiChatDrawingShow(props.drawingId);
@@ -3498,7 +5361,9 @@ onBeforeUnmount(() => {
 	props.connection.off('drawUndo', onRemoteUndo);
 	props.connection.off('drawingCursor', onRemoteCursor);
 	window.removeEventListener('keydown', onKeyDown);
-	window.removeEventListener('mousedown', closeColorPopoverOnOutside);
+	if (rootEl.value) {
+		rootEl.value.removeEventListener('touchend', onRootTouchEnd);
+	}
 	if (presenceInterval) globalThis.clearInterval(presenceInterval);
 	if (tickInterval) globalThis.clearInterval(tickInterval);
 	if (resizeObserver) resizeObserver.disconnect();
@@ -3526,12 +5391,227 @@ onBeforeUnmount(() => {
 	-webkit-touch-callout: none;
 	-webkit-tap-highlight-color: transparent;
 	-webkit-user-drag: none;
+	// iPad Safari のダブルタップズーム / 300ms タップディレイを抑止。canvas は
+	// `touch-action: none` のまま、param panel など子要素のスクロールは維持される。
+	touch-action: manipulation;
 }
 
 .root input[type="text"],
 .root input[type="number"] {
 	user-select: text;
 	-webkit-user-select: text;
+}
+
+// Main workspace row: left tool strip / canvas / right param panel laid out
+// horizontally and stretching to fill all vertical space between the window
+// header and the bottom bar / footer.
+.workspace {
+	flex: 1 1 0;
+	min-height: 0;
+	display: flex;
+	flex-direction: row;
+	align-items: stretch;
+}
+
+// Left vertical tool strip — fixed-width column of tool buttons.
+.toolStrip {
+	flex: 0 0 auto;
+	width: 48px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	padding: 8px 6px;
+	background: var(--MI_THEME-panel);
+	border-right: solid 1px var(--MI_THEME-divider);
+	overflow-y: auto;
+}
+
+// Horizontal hairline divider used to subgroup tool-strip buttons (pigment /
+// modifier / helper). Mirrors the row-layout `subseparator` but laid sideways.
+.toolStripDivider {
+	width: 28px;
+	height: 1px;
+	background: var(--MI_THEME-divider);
+	opacity: 0.4;
+	margin: 4px 0;
+}
+
+// Right parameter panel — stacked sections (color, brush, tool-specific, layer).
+// Scrolls vertically when the window is short.
+.paramPanel {
+	flex: 0 0 auto;
+	width: 220px;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 5px;
+	background: var(--MI_THEME-panel);
+	border-left: solid 1px var(--MI_THEME-divider);
+	overflow-y: auto;
+}
+
+// One labelled section in the param panel.
+.panelSection {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 4px 6px 5px;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--MI_THEME-bg) 35%, transparent);
+}
+
+.panelTitle {
+	font-size: 0.72em;
+	font-weight: 600;
+	text-transform: none;
+	color: var(--MI_THEME-fgTransparentWeak);
+	margin: 0;
+	padding: 0;
+	letter-spacing: 0.04em;
+	line-height: 1.3;
+}
+
+// Inline horizontal row inside a section (e.g., color swatch + button row).
+.panelRow {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+
+// Compact inline slider field used inside the right panel: label / slider /
+// value share a single row so the section stays as short as possible.
+.sliderFieldStacked {
+	flex-direction: row;
+	align-items: center;
+	padding: 2px 4px;
+	gap: 5px;
+	font-size: 0.78em;
+
+	.toolLabel {
+		flex: 0 0 auto;
+		min-width: 66px;
+		font-size: 0.95em;
+		white-space: nowrap;
+	}
+
+	.widthSlider {
+		flex: 1 1 auto;
+		min-width: 0;
+		width: auto;
+	}
+
+	.widthValue {
+		flex: 0 0 auto;
+		min-width: 22px;
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+}
+
+// Full-width toggle button used inside panel sections (筆圧検知, コア線).
+.panelToggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 8px;
+	border-radius: 5px;
+	font-size: 0.78em;
+	background: color-mix(in srgb, var(--MI_THEME-bg) 55%, transparent);
+
+	&:hover:not(:disabled) {
+		background: var(--MI_THEME-accentedBg);
+	}
+}
+
+// Layer list — vertical list of all 3 layers, with the active row clearly
+// highlighted (filled background + leading accent bar + trailing checkmark)
+// so it's never ambiguous which layer the next stroke targets.
+.layerList {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+.layerRow {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px 4px 5px;
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--MI_THEME-bg) 60%, transparent);
+	color: var(--MI_THEME-fg);
+	text-align: left;
+	font-size: 0.82em;
+
+	&:hover:not(:disabled) {
+		background: var(--MI_THEME-accentedBg);
+	}
+
+	&:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+}
+
+.layerRowActive {
+	background: color-mix(in srgb, var(--MI_THEME-accent) 22%, var(--MI_THEME-bg));
+	color: var(--MI_THEME-fg);
+	font-weight: 600;
+
+	&:hover:not(:disabled) {
+		background: color-mix(in srgb, var(--MI_THEME-accent) 30%, var(--MI_THEME-bg));
+	}
+}
+
+// Leading accent bar on the active row — a 3px vertical strip that's much
+// more visible than just a background tint, so the active layer reads at a
+// glance regardless of which layer is selected.
+.layerRowMarker {
+	flex: 0 0 3px;
+	align-self: stretch;
+	border-radius: 2px;
+	background: transparent;
+
+	.layerRowActive & {
+		background: var(--MI_THEME-accent);
+	}
+}
+
+.layerRowIcon {
+	font-size: 1.05em;
+	color: var(--MI_THEME-fgTransparentWeak);
+
+	.layerRowActive & {
+		color: var(--MI_THEME-accent);
+	}
+}
+
+.layerRowLabel {
+	flex: 1 1 auto;
+}
+
+.layerRowCheck {
+	flex: 0 0 auto;
+	font-size: 0.95em;
+	color: var(--MI_THEME-accent);
+}
+
+// Slim bottom bar — sits below the workspace, above the footer. Holds the
+// status-bar-style controls: history, view, and the destructive clear button.
+.bottomBar {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 10px;
+	background: color-mix(in srgb, var(--MI_THEME-panel) 92%, transparent);
+	border-top: solid 1px var(--MI_THEME-divider);
 }
 
 .toolbar {
@@ -3691,10 +5771,11 @@ onBeforeUnmount(() => {
 }
 
 .colorSwatch {
-	width: 36px;
-	height: 28px;
+	flex: 0 0 auto;
+	width: 24px;
+	height: 22px;
 	border: 1px solid var(--MI_THEME-divider);
-	border-radius: 6px;
+	border-radius: 4px;
 	padding: 2px;
 	background: conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
 	cursor: pointer;
@@ -3721,16 +5802,17 @@ onBeforeUnmount(() => {
 
 .recentColors {
 	display: flex;
-	gap: 3px;
+	gap: 2px;
 	align-items: center;
-	max-width: 180px;
+	max-width: 100%;
 	overflow: hidden;
+	flex-wrap: wrap;
 }
 
 .recentColorChip {
-	width: 18px;
-	height: 18px;
-	border-radius: 4px;
+	width: 14px;
+	height: 14px;
+	border-radius: 3px;
 	border: 1px solid var(--MI_THEME-divider);
 	cursor: pointer;
 
@@ -3759,8 +5841,8 @@ onBeforeUnmount(() => {
 }
 
 .wheelCanvas {
-	width: 200px;
-	height: 200px;
+	width: 150px;
+	height: 150px;
 	touch-action: none;
 	align-self: center;
 	user-select: none;
@@ -3771,7 +5853,7 @@ onBeforeUnmount(() => {
 .wheelSliderRow {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 4px;
 }
 
 .wheelSlider {
@@ -3781,13 +5863,13 @@ onBeforeUnmount(() => {
 .hexInput {
 	flex: 1;
 	min-width: 0;
-	padding: 4px 6px;
+	padding: 2px 5px;
 	border: 1px solid var(--MI_THEME-divider);
 	border-radius: 4px;
 	background: var(--MI_THEME-bg);
 	color: var(--MI_THEME-fg);
 	font-family: ui-monospace, monospace;
-	font-size: 0.85em;
+	font-size: 0.78em;
 }
 
 .widthSlider {
@@ -3807,7 +5889,11 @@ onBeforeUnmount(() => {
 }
 
 .canvasArea {
-	flex: 1 1 auto;
+	// Stretches to fill all space between the left tool strip and the right
+	// param panel. min-width: 0 keeps flex from inflating to fit content when
+	// the canvas is wider than the available width.
+	flex: 1 1 0;
+	min-width: 0;
 	min-height: 0;
 	background: var(--MI_THEME-bg);
 	position: relative;
@@ -3986,6 +6072,60 @@ onBeforeUnmount(() => {
 	border-radius: 50%;
 	z-index: 20;
 	transition: width 0.08s ease, height 0.08s ease;
+}
+
+.rotateHandle {
+	position: absolute;
+	top: 14px;
+	left: 50%;
+	transform: translateX(-50%);
+	width: 48px;
+	height: 48px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.85);
+	border: 2px solid var(--MI_THEME-accent);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+	cursor: grab;
+	touch-action: none;
+	z-index: 22;
+	user-select: none;
+	-webkit-user-select: none;
+
+	&:active {
+		cursor: grabbing;
+	}
+}
+
+.rotateHandleDial {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+}
+
+.rotateHandleArrow {
+	color: var(--MI_THEME-accent);
+	font-size: 20px;
+	line-height: 1;
+}
+
+.rotateHandleLabel {
+	position: absolute;
+	bottom: -18px;
+	font-size: 0.7em;
+	font-variant-numeric: tabular-nums;
+	color: var(--MI_THEME-fg);
+	background: rgba(255, 255, 255, 0.85);
+	padding: 1px 6px;
+	border-radius: 8px;
+	pointer-events: none;
+	white-space: nowrap;
 }
 
 .footer {
