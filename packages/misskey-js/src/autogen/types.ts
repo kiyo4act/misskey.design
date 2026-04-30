@@ -5727,6 +5727,8 @@ export type components = {
             width: number;
             height: number;
             imageUrl: string | null;
+            mainImageUrl: string | null;
+            liveTilePatches?: components['schemas']['ChatDrawingTilePatch'][];
             strokes: {
                 points: number[][];
                 color: string;
@@ -5745,6 +5747,15 @@ export type components = {
             width: number;
             height: number;
             imageUrl: string | null;
+        };
+        ChatDrawingTilePatch: {
+            id?: string;
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+            dataBase64: string;
+            composite: string;
         };
     };
     responses: never;
@@ -16831,6 +16842,7 @@ export interface operations {
                     drawingId: string;
                     strokes: Record<string, never>[];
                     imageBase64?: string | null;
+                    mainImageBase64?: string | null;
                 };
             };
         };

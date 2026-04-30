@@ -71,3 +71,4 @@ export type ChatRoomInvitation = components['schemas']['ChatRoomInvitation'];
 export type ChatRoomMembership = components['schemas']['ChatRoomMembership'];
 export type ChatDrawing = components['schemas']['ChatDrawing'];
 export type ChatDrawingLite = components['schemas']['ChatDrawingLite'];
+export type ChatDrawingTilePatch = components['schemas']['ChatDrawingTilePatch'];

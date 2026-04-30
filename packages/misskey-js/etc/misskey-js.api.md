@@ -891,10 +891,70 @@ export type Channels = {
                 user?: UserLite;
                 messageId: ChatMessageLite['id'];
             }) => void;
+            drawStroke: (payload: {
+                userId: User['id'];
+                drawingId: string;
+                stroke: ChatDrawStroke;
+            }) => void;
+            drawTilePatch: (payload: {
+                userId: User['id'];
+                drawingId: string;
+                patch: ChatDrawTilePatch;
+            }) => void;
+            drawClear: (payload: {
+                userId: User['id'];
+                drawingId: string;
+            }) => void;
+            drawingUpdated: (payload: {
+                drawingId: string;
+                imageAccessKey: string;
+                imageUrl: string;
+                updatedAt: string;
+                lastEditedById: User['id'];
+            }) => void;
+            drawingPresence: (payload: {
+                drawingId: string;
+                userId: User['id'];
+                user: UserLite;
+            }) => void;
+            drawUndo: (payload: {
+                userId: User['id'];
+                drawingId: string;
+                strokeId: string;
+            }) => void;
+            drawingCursor: (payload: {
+                drawingId: string;
+                userId: User['id'];
+                x: number;
+                y: number;
+            }) => void;
         };
         receives: {
             read: {
                 id: ChatMessageLite['id'];
+            };
+            drawStroke: {
+                drawingId: string;
+                stroke: ChatDrawStroke;
+            };
+            drawTilePatch: {
+                drawingId: string;
+                patch: ChatDrawTilePatch;
+            };
+            drawClear: {
+                drawingId: string;
+            };
+            drawingPresence: {
+                drawingId: string;
+            };
+            drawUndo: {
+                drawingId: string;
+                strokeId: string;
+            };
+            drawingCursor: {
+                drawingId: string;
+                x: number;
+                y: number;
             };
         };
     };
@@ -915,10 +975,70 @@ export type Channels = {
                 user?: UserLite;
                 messageId: ChatMessageLite['id'];
             }) => void;
+            drawStroke: (payload: {
+                userId: User['id'];
+                drawingId: string;
+                stroke: ChatDrawStroke;
+            }) => void;
+            drawTilePatch: (payload: {
+                userId: User['id'];
+                drawingId: string;
+                patch: ChatDrawTilePatch;
+            }) => void;
+            drawClear: (payload: {
+                userId: User['id'];
+                drawingId: string;
+            }) => void;
+            drawingUpdated: (payload: {
+                drawingId: string;
+                imageAccessKey: string;
+                imageUrl: string;
+                updatedAt: string;
+                lastEditedById: User['id'];
+            }) => void;
+            drawingPresence: (payload: {
+                drawingId: string;
+                userId: User['id'];
+                user: UserLite;
+            }) => void;
+            drawUndo: (payload: {
+                userId: User['id'];
+                drawingId: string;
+                strokeId: string;
+            }) => void;
+            drawingCursor: (payload: {
+                drawingId: string;
+                userId: User['id'];
+                x: number;
+                y: number;
+            }) => void;
         };
         receives: {
             read: {
                 id: ChatMessageLite['id'];
+            };
+            drawStroke: {
+                drawingId: string;
+                stroke: ChatDrawStroke;
+            };
+            drawTilePatch: {
+                drawingId: string;
+                patch: ChatDrawTilePatch;
+            };
+            drawClear: {
+                drawingId: string;
+            };
+            drawingPresence: {
+                drawingId: string;
+            };
+            drawUndo: {
+                drawingId: string;
+                strokeId: string;
+            };
+            drawingCursor: {
+                drawingId: string;
+                x: number;
+                y: number;
             };
         };
     };
@@ -1064,6 +1184,33 @@ type ChartsUsersRequest = operations['charts___users']['requestBody']['content']
 
 // @public (undocumented)
 type ChartsUsersResponse = operations['charts___users']['responses']['200']['content']['application/json'];
+
+// @public (undocumented)
+type ChatDrawing = components['schemas']['ChatDrawing'];
+
+// @public (undocumented)
+type ChatDrawingLite = components['schemas']['ChatDrawingLite'];
+
+// @public (undocumented)
+type ChatDrawingsCreateRequest = operations['chat___drawings___create']['requestBody']['content']['application/json'];
+
+// @public (undocumented)
+type ChatDrawingsCreateResponse = operations['chat___drawings___create']['responses']['200']['content']['application/json'];
+
+// @public (undocumented)
+type ChatDrawingsShowRequest = operations['chat___drawings___show']['requestBody']['content']['application/json'];
+
+// @public (undocumented)
+type ChatDrawingsShowResponse = operations['chat___drawings___show']['responses']['200']['content']['application/json'];
+
+// @public (undocumented)
+type ChatDrawingsUpdateRequest = operations['chat___drawings___update']['requestBody']['content']['application/json'];
+
+// @public (undocumented)
+type ChatDrawingsUpdateResponse = operations['chat___drawings___update']['responses']['200']['content']['application/json'];
+
+// @public (undocumented)
+type ChatDrawingTilePatch = components['schemas']['ChatDrawingTilePatch'];
 
 // @public (undocumented)
 type ChatHistoryRequest = operations['chat___history']['requestBody']['content']['application/json'];
@@ -1734,6 +1881,12 @@ declare namespace entities {
         ChartsUserReactionsResponse,
         ChartsUsersRequest,
         ChartsUsersResponse,
+        ChatDrawingsCreateRequest,
+        ChatDrawingsCreateResponse,
+        ChatDrawingsShowRequest,
+        ChatDrawingsShowResponse,
+        ChatDrawingsUpdateRequest,
+        ChatDrawingsUpdateResponse,
         ChatHistoryRequest,
         ChatHistoryResponse,
         ChatMessagesCreateToRoomRequest,
@@ -2240,7 +2393,10 @@ declare namespace entities {
         ChatMessageLiteForRoom,
         ChatRoom,
         ChatRoomInvitation,
-        ChatRoomMembership
+        ChatRoomMembership,
+        ChatDrawing,
+        ChatDrawingLite,
+        ChatDrawingTilePatch
     }
 }
 export { entities }
@@ -3884,6 +4040,8 @@ type VerifyEmailRequest = operations['verify-email']['requestBody']['content']['
 // src/streaming.ts:57:3 - (ae-forgotten-export) The symbol "ReconnectingWebSocket" needs to be exported by the entry point index.d.ts
 // src/streaming.types.ts:226:4 - (ae-forgotten-export) The symbol "ReversiUpdateKey" needs to be exported by the entry point index.d.ts
 // src/streaming.types.ts:241:4 - (ae-forgotten-export) The symbol "ReversiUpdateSettings" needs to be exported by the entry point index.d.ts
+// src/streaming.types.ts:265:5 - (ae-forgotten-export) The symbol "ChatDrawStroke" needs to be exported by the entry point index.d.ts
+// src/streaming.types.ts:270:5 - (ae-forgotten-export) The symbol "ChatDrawTilePatch" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 
