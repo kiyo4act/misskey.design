@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { InjectionKey, Ref } from 'vue';
+import type { InjectionKey, Ref, ComputedRef } from 'vue';
 import type * as Misskey from 'misskey-js';
 import type { PageMetadata } from '@/page.js';
 import type { Router } from '@/router.js';
@@ -25,4 +25,5 @@ export const DI = {
 	inAppSearchMarkerId: Symbol() as InjectionKey<Ref<string | null>>,
 	chatConnection: Symbol() as InjectionKey<Ref<ChatConnection | null>>,
 	chatTarget: Symbol() as InjectionKey<Ref<{ roomId: string | null; otherUserId: string | null }>>,
+	inChannel: Symbol() as InjectionKey<ComputedRef<string | null> | null>, // 現在開いているチャンネルのID
 };
