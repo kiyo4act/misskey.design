@@ -26,4 +26,5 @@ export const DI = {
 	chatConnection: Symbol() as InjectionKey<Ref<ChatConnection | null>>,
 	chatTarget: Symbol() as InjectionKey<Ref<{ roomId: string | null; otherUserId: string | null }>>,
 	inChannel: Symbol() as InjectionKey<ComputedRef<string | null> | null>, // 現在開いているチャンネルのID
+	mkLightboxItemVideoEl: Symbol() as InjectionKey<Ref<HTMLVideoElement | null>>,
 };
