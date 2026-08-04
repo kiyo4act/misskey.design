@@ -175,10 +175,15 @@ function onContextmenu(ev: PointerEvent) {
 }
 
 .hiddenTextWrapper {
-	display: table-cell;
 	text-align: center;
 	font-size: 0.8em;
-	color: #fff;
+	// プレースホルダーの明るさに依存せず読めるように、テーマ色のパネルを敷く
+	color: var(--MI_THEME-fg);
+	background-color: color(from var(--MI_THEME-panel) srgb r g b / 0.85);
+	padding: 6px 12px;
+	border-radius: var(--MI-radius);
+	-webkit-backdrop-filter: var(--MI-blur, blur(15px));
+	backdrop-filter: var(--MI-blur, blur(15px));
 }
 
 .visible {

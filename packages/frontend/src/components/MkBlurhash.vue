@@ -78,6 +78,8 @@ const canvasWidth = ref(64);
 const canvasHeight = ref(64);
 const viewId = genId();
 const bitmapTmp = shallowRef<CanvasImageSource | undefined>();
+// drawAvgがcanvasのmount前に呼ばれてスキップされたかどうか
+let avgColorPending = false;
 
 watch([() => props.width, () => props.height, canvas], () => {
 	const ratio = props.width / props.height;
@@ -111,7 +113,13 @@ function drawImage(bitmap: CanvasImageSource) {
 }
 
 function drawAvg() {
-	if (!canvas.value) return;
+	// canvasがない（mountedされていない）場合はmounted後に描画し直す
+	if (!canvas.value) {
+		avgColorPending = true;
+		return;
+	}
+
+	avgColorPending = false;
 
 	const color = (props.blurhash != null && extractAvgColorFromBlurhash(props.blurhash)) || '#888';
 
@@ -170,6 +178,10 @@ onMounted(() => {
 	// drawImageがmountedより先に呼ばれている場合はここで描画する
 	if (bitmapTmp.value) {
 		drawImage(bitmapTmp.value);
+	} else if (avgColorPending) {
+		// blurhashが無い場合はdrawAvgしか呼ばれないため、mounted前にスキップされていると
+		// canvasが透明のまま残ってしまう（ライトモードでは白背景と同化する）
+		drawAvg();
 	}
 });
 
