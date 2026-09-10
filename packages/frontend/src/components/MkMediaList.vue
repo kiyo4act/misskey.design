@@ -23,7 +23,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<XAudio
 					v-if="media.type.startsWith('audio')"
 					:key="`audio:${media.id}`"
-					:class="[$style.media, $style.mediaAudio]"
+					:class="[$style.media, $style.mediaPlayer]"
 					:audio="media"
 					@mediaClick="onMediaClick(media)"
 				/>
@@ -31,7 +31,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 					v-if="media.type.startsWith('video')"
 					:key="`video:${media.id}`"
 					:ref="(comp) => { mediaComponents.set(media.id, comp as InstanceType<typeof XVideo> | null); }"
-					:class="$style.media"
+					:class="[$style.media, $style.mediaPlayer]"
 					:video="media"
 					@mediaClick="onMediaClick(media)"
 				/>
@@ -135,8 +135,10 @@ onUnmounted(() => {
 });
 
 function onMediaClick(file: Misskey.entities.DriveFile) {
-	// 音声は「画像を新しいタブで開く」の対象外 (別タブに飛ぶとプレイヤーが使えなくなるため)
-	if (prefer.s.imageNewTab && !file.type.startsWith('audio')) {
+	// 音声・動画は「画像を新しいタブで開く」の対象外。
+	// 一覧上ではインライン再生できず、別タブでファイル URL を開くと
+	// プレイヤーが使えなくなるため、常に lightbox で開く
+	if (prefer.s.imageNewTab && file.type.startsWith('image')) {
 		window.open(file.url, '_blank');
 		return;
 	}
@@ -277,8 +279,8 @@ defineExpose({
 	cursor: zoom-in;
 }
 
-// 音声は拡大表示ではなくプレイヤーを開くので zoom-in カーソルにしない
-.mediaAudio {
+// 音声・動画は拡大表示ではなくプレイヤーを開くので zoom-in カーソルにしない
+.mediaPlayer {
 	cursor: pointer;
 }
 
