@@ -19,7 +19,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				:enableEmojiMenu="true"
 				:enableEmojiMenuReaction="true"
 			/>
-			<MkMediaList v-if="message.file" :mediaList="[message.file]"/>
+			<MkMediaList v-if="message.file" :mediaList="[message.file]" :user="message.fromUser"/>
 			<div v-if="drawing" :class="$style.drawing">
 				<div v-if="drawing.title" :class="$style.drawingTitle"><i class="ti ti-brush"></i> {{ drawing.title }}</div>
 				<img :src="drawing.imageUrl ?? ''" :class="$style.drawingImage" alt="drawing"/>
