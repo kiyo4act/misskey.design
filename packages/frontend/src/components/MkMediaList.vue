@@ -23,7 +23,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				<XAudio
 					v-if="media.type.startsWith('audio')"
 					:key="`audio:${media.id}`"
-					:class="$style.media"
+					:class="[$style.media, $style.mediaAudio]"
 					:audio="media"
 					@mediaClick="onMediaClick(media)"
 				/>
@@ -135,7 +135,8 @@ onUnmounted(() => {
 });
 
 function onMediaClick(file: Misskey.entities.DriveFile) {
-	if (prefer.s.imageNewTab) {
+	// 音声は「画像を新しいタブで開く」の対象外 (別タブに飛ぶとプレイヤーが使えなくなるため)
+	if (prefer.s.imageNewTab && !file.type.startsWith('audio')) {
 		window.open(file.url, '_blank');
 		return;
 	}
@@ -274,6 +275,11 @@ defineExpose({
 	overflow: hidden; // clipにするとバグる
 	border-radius: 8px;
 	cursor: zoom-in;
+}
+
+// 音声は拡大表示ではなくプレイヤーを開くので zoom-in カーソルにしない
+.mediaAudio {
+	cursor: pointer;
 }
 
 @container (min-width: 500px) {
