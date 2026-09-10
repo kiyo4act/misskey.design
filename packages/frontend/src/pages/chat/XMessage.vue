@@ -102,19 +102,19 @@ async function downloadDrawing() {
 	try {
 		// Fetch as blob so the browser downloads the file instead of navigating away;
 		// chat-drawings/*.png is served from the same origin so no CORS surprise here.
-		const res = await fetch(d.imageUrl, { credentials: 'omit', cache: 'no-store' });
+		const res = await window.fetch(d.imageUrl, { credentials: 'omit', cache: 'no-store' });
 		if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
 		const blob = await res.blob();
 		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
+		const a = window.document.createElement('a');
 		a.href = url;
 		const safeTitle = (d.title || 'drawing').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
 		const stamp = new Date(d.updatedAt ?? Date.now()).toISOString().replace(/[:.]/g, '-');
 		a.download = `${safeTitle}-${stamp}.png`;
-		document.body.appendChild(a);
+		window.document.body.appendChild(a);
 		a.click();
-		document.body.removeChild(a);
-		setTimeout(() => URL.revokeObjectURL(url), 0);
+		window.document.body.removeChild(a);
+		window.setTimeout(() => URL.revokeObjectURL(url), 0);
 	} catch (err) {
 		console.error(err);
 		os.alert({ type: 'error', text: i18n.ts.somethingHappened });
