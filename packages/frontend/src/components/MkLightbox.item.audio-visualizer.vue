@@ -63,6 +63,9 @@ const canvasCtx = computed(() => canvasEl.value?.getContext('2d') ?? null);
 const fileUser = computed(() => props.content.file?.user ?? props.user);
 
 //#region 描画パラメータ
+/** テーマからアクセントカラーを解決できなかった場合の既定値 (ベーステーマの値) */
+const DEFAULT_ACCENT_COLOR = '#86b300';
+
 const BAND_COUNT = 96;
 const BASE_HALF_HEIGHT_RATIO = 0.003;
 
@@ -305,7 +308,19 @@ function updateRange(range: AnalysisRange, frameMin: number, framePeak: number, 
 }
 //#endregion
 
-const accentColorHue = tinycolor(themeManager.currentCompiledTheme!.accent).toHsl().h;
+// テーマ未適用のタイミングで読まれると currentCompiledTheme が null になり得るため、
+// 適用済みのCSS変数 → ベーステーマの既定値 の順にフォールバックする
+function resolveAccentColor(): string {
+	const fromTheme = themeManager.currentCompiledTheme?.accent;
+	if (fromTheme != null) return fromTheme.toString();
+
+	const fromCssVar = window.getComputedStyle(window.document.documentElement).getPropertyValue('--MI_THEME-accent').trim();
+	if (fromCssVar !== '') return fromCssVar;
+
+	return DEFAULT_ACCENT_COLOR;
+}
+
+const accentColorHue = tinycolor(resolveAccentColor()).toHsl().h;
 
 // 読み込みが終わるまでは描画しない (読み込み完了時の描き直しは下のwatchで行う)
 const avatarImage = shallowRef<HTMLImageElement | null>(null);
