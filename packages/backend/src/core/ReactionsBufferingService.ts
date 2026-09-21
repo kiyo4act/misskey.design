@@ -11,6 +11,8 @@ import { bindThis } from '@/decorators.js';
 import type { MiUser, NotesRepository } from '@/models/_.js';
 import type { Config } from '@/config.js';
 import { PER_NOTE_REACTION_USER_PAIR_CACHE_MAX } from '@/const.js';
+import { LoggerService } from '@/core/LoggerService.js';
+import type Logger from '@/logger.js';
 import type { GlobalEvents } from '@/core/GlobalEventService.js';
 import type { OnApplicationShutdown } from '@nestjs/common';
 
@@ -19,6 +21,8 @@ const REDIS_PAIR_PREFIX = 'reactionsBufferPairs';
 
 @Injectable()
 export class ReactionsBufferingService implements OnApplicationShutdown {
+	private logger: Logger;
+
 	constructor(
 		@Inject(DI.config)
 		private config: Config,
@@ -31,7 +35,10 @@ export class ReactionsBufferingService implements OnApplicationShutdown {
 
 		@Inject(DI.notesRepository)
 		private notesRepository: NotesRepository,
+
+		private loggerService: LoggerService,
 	) {
+		this.logger = this.loggerService.getLogger('reactions-buffering');
 		this.redisForSub.on('message', this.onMessage);
 	}
 
@@ -161,28 +168,64 @@ export class ReactionsBufferingService implements OnApplicationShutdown {
 
 		const bufferedMap = await this.getMany(bufferedNoteIds);
 
-		// clear
-		const pipeline = this.redisForReactions.pipeline();
-		for (const noteId of bufferedNoteIds) {
-			pipeline.del(`${REDIS_DELTA_PREFIX}:${noteId}`);
-			pipeline.del(`${REDIS_PAIR_PREFIX}:${noteId}`);
-		}
-		await pipeline.exec();
-
+		// DBへの書き込みが完了したものだけをRedisから消す。
+		// 先にRedisを消すと、書き込み前にプロセスが落ちた場合にバッファの内容が失われる
+		// (どちらにも存在しない状態になり、リアクションが恒久的に消失する)。
 		// TODO: SQL一個にまとめたい
+		const bakedNoteIds: MiNote['id'][] = [];
 		for (const [noteId, buffered] of bufferedMap) {
 			const sql = Object.entries(buffered.deltas)
 				.map(([reaction, count]) =>
 					`jsonb_set("reactions", '{${reaction}}', (COALESCE("reactions"->>'${reaction}', '0')::int + ${count})::text::jsonb)`)
 				.join(' || ');
 
-			this.notesRepository.createQueryBuilder().update()
-				.set({
-					reactions: () => sql,
-					reactionAndUserPairCache: buffered.pairs.map(x => x.join('/')),
-				})
-				.where('id = :id', { id: noteId })
-				.execute();
+			try {
+				await this.notesRepository.createQueryBuilder().update()
+					.set({
+						reactions: () => sql,
+						reactionAndUserPairCache: buffered.pairs.map(x => x.join('/')),
+					})
+					.where('id = :id', { id: noteId })
+					.execute();
+
+				bakedNoteIds.push(noteId);
+			} catch (err) {
+				// 失敗したnoteのバッファは消さずに残し、次回のbakeで再試行する
+				this.logger.error(`Failed to bake buffered reactions of note ${noteId}`, { err });
+			}
+		}
+
+		// clear
+		// 読み取ってからここまでの間に増えた分を消さないよう、
+		// 実際にDBへ反映したreactionのぶんだけを打ち消す (hincrbyで減算する)。
+		// キーごとdelすると、その間に入ったリアクションが書き込まれないまま消える。
+		if (bakedNoteIds.length > 0) {
+			const pipeline = this.redisForReactions.pipeline();
+			for (const noteId of bakedNoteIds) {
+				const buffered = bufferedMap.get(noteId)!;
+				for (const [reaction, count] of Object.entries(buffered.deltas)) {
+					pipeline.hincrby(`${REDIS_DELTA_PREFIX}:${noteId}`, reaction, -count);
+				}
+				for (const pair of buffered.pairs) {
+					pipeline.zrem(`${REDIS_PAIR_PREFIX}:${noteId}`, pair.join('/'));
+				}
+			}
+			await pipeline.exec();
+
+			// 打ち消した結果0になったフィールドを掃除する
+			// (残しておくと、次回以降のbakeが空のバッファを拾い続けてしまう)
+			const remainings = await this.getMany(bakedNoteIds);
+			const cleanup = this.redisForReactions.pipeline();
+			for (const [noteId, remaining] of remainings) {
+				const emptied = Object.entries(remaining.deltas)
+					.filter(([, count]) => count === 0)
+					.map(([reaction]) => reaction);
+
+				if (emptied.length > 0) {
+					cleanup.hdel(`${REDIS_DELTA_PREFIX}:${noteId}`, ...emptied);
+				}
+			}
+			await cleanup.exec();
 		}
 	}
 
@@ -205,7 +248,16 @@ export class ReactionsBufferingService implements OnApplicationShutdown {
 	}
 
 	@bindThis
-	public onApplicationShutdown(signal?: string | undefined): void {
+	public async onApplicationShutdown(signal?: string | undefined): Promise<void> {
+		// bakeは通常1日1回しか実行されないため、シャットダウン時にflushしておかないと
+		// 前回のbakeから今までにバッファされたリアクションがRedis上に取り残される。
+		// (Redisが揮発した場合や、そのままバッファリングが無効化された場合に失われる)
+		try {
+			await this.bake();
+		} catch (err) {
+			this.logger.error('Failed to bake buffered reactions on shutdown', { err });
+		}
+
 		this.dispose();
 	}
 }
