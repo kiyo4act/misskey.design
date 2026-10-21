@@ -226,7 +226,12 @@ export class SearchService {
 		if (this.config.fulltextSearch?.provider === 'sqlPgroonga') {
 			query.andWhere('note.text &@~ :q', { q });
 		} else {
-			query.andWhere('LOWER(note.text) LIKE :q', { q: `%${ sqlLikeEscape(q.toLowerCase()) }%` });
+			// 空白 (全角スペース含む) 区切りの各キーワードをすべて含むノートを AND 検索する
+			const keywords = q.trim().split(/\s+/).filter(x => x !== '');
+			if (keywords.length === 0) keywords.push(q);
+			for (const [i, keyword] of keywords.entries()) {
+				query.andWhere(`LOWER(note.text) LIKE :q${i}`, { [`q${i}`]: `%${ sqlLikeEscape(keyword.toLowerCase()) }%` });
+			}
 		}
 
 		if (opts.host) {

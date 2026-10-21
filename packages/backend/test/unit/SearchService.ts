@@ -208,6 +208,23 @@ describe('SearchService', () => {
 		},
 	) {
 		describe('searchNote', () => {
+			test('matches notes containing all space-separated keywords', async () => {
+				const ctx = getCtx();
+				const me = await createUser(ctx, { username: 'me', usernameLower: 'me', host: null });
+				const author = await createUser(ctx, { username: 'author', usernameLower: 'author', host: null });
+
+				const bothNote = await createNote(ctx, author, { text: 'apple and banana', visibility: 'public' });
+				const reversedNote = await createNote(ctx, author, { text: 'banana then apple', visibility: 'public' });
+				await createNote(ctx, author, { text: 'apple only', visibility: 'public' });
+				await createNote(ctx, author, { text: 'banana only', visibility: 'public' });
+
+				const halfWidth = await ctx.service.searchNote('apple banana', me, {}, { limit: 10 });
+				expect(halfWidth.map(note => note.id).sort()).toEqual([bothNote.id, reversedNote.id].sort());
+
+				const fullWidth = await ctx.service.searchNote('apple　banana', me, {}, { limit: 10 });
+				expect(fullWidth.map(note => note.id).sort()).toEqual([bothNote.id, reversedNote.id].sort());
+			});
+
 			test('filters notes by visibility (followers only visible to followers)', async () => {
 				const ctx = getCtx();
 				const me = await createUser(ctx, { username: 'me', usernameLower: 'me', host: null });
