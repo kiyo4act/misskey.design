@@ -42,7 +42,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 				</MkButton>
 			</template>
 			<template v-else>
-				<MkButton v-if="!selectedFolders.some(f => f.id === folder!.id)" @click="selectedFolders.push(folder)">
+				<MkButton v-if="!selectedFolders.some(f => f.id === folder!.id)" @click="selectedFolders = multiple ? [...selectedFolders, folder!] : [folder!]">
 					<i class="ti ti-square"></i> {{ i18n.ts.selectFolder }}
 				</MkButton>
 				<MkButton v-else @click="selectedFolders = selectedFolders.filter(f => f.id !== folder!.id)">
@@ -268,6 +268,9 @@ const filesTimeline = makeDateGroupedTimelineComputedRef(filesPaginator.items, '
 const shouldBeGroupedByDate = computed(() => ['+createdAt', '-createdAt'].includes(sortModeSelect.value));
 
 watch(folder, () => emit('cd', folder.value));
+watch(isEditMode, (v) => {
+	if (!v && props.select !== 'file') selectedFiles.value = [];
+});
 watch(sortModeSelect, () => {
 	initialize();
 });
@@ -586,12 +589,17 @@ async function moveFilesBulk() {
 
 	if (canceled) return;
 
+	const filesToMove = [...selectedFiles.value];
+
 	await os.apiWithDialog('drive/files/move-bulk', {
-		fileIds: selectedFiles.value.map(f => f.id),
+		fileIds: filesToMove.map(f => f.id),
 		folderId: folders[0] ? folders[0].id : null,
 	});
 
-	globalEvents.emit('driveFilesUpdated', selectedFiles.value.map(x => ({
+	// 移動済みのファイルが選択に残ると、次回の移動で一緒に移動されてしまう
+	selectedFiles.value = selectedFiles.value.filter(f => !filesToMove.some(x => x.id === f.id));
+
+	globalEvents.emit('driveFilesUpdated', filesToMove.map(x => ({
 		...x,
 		folderId: folders[0] ? folders[0].id : null,
 		folder: folders[0] ?? null,
