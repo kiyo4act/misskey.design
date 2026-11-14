@@ -4,6 +4,7 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import type { InstancesRepository } from '@/models/_.js';
 import { Endpoint } from '@/server/api/endpoint-base.js';
 import { DI } from '@/di-symbols.js';
@@ -68,6 +69,9 @@ export const paramDef = {
 @Injectable()
 export default class extends Endpoint<typeof meta, typeof paramDef> { // eslint-disable-line import/no-default-export
 	constructor(
+		@Inject(DI.db)
+		private db: DataSource,
+
 		@Inject(DI.instancesRepository)
 		private instancesRepository: InstancesRepository,
 
@@ -83,17 +87,34 @@ export default class extends Endpoint<typeof meta, typeof paramDef> { // eslint-
 			const usersCount = usersChart.local.total[0] + usersChart.remote.total[0];
 			const originalUsersCount = usersChart.local.total[0];
 
-			const instances = await this.instancesRepository.count({ cache: 3600000 });
+			const [instances, reactionsCount] = await Promise.all([
+				this.instancesRepository.count({ cache: 3600000 }),
+				this.estimateReactionsCount(),
+			]);
 
 			return {
 				notesCount,
 				originalNotesCount,
 				usersCount,
 				originalUsersCount,
+				reactionsCount,
 				instances,
 				driveUsageLocal: 0,
 				driveUsageRemote: 0,
 			};
 		});
+	}
+
+	/**
+	 * note_reaction の行数を PostgreSQL の統計情報 (pg_class.reltuples) から推定する。
+	 * 全件 COUNT(*) は大規模テーブルの全走査になり DB 負荷が大きいため使わない。
+	 * 統計が未収集 (-1) またはテーブルが見つからない場合は 0 を返す。
+	 */
+	private async estimateReactionsCount(): Promise<number> {
+		const rows: { estimate: string | null }[] = await this.db.query(
+			'SELECT reltuples::bigint AS "estimate" FROM pg_class WHERE oid = to_regclass(\'note_reaction\')',
+		);
+		const estimate = parseInt(rows[0]?.estimate ?? '0', 10);
+		return Number.isFinite(estimate) && estimate > 0 ? estimate : 0;
 	}
 }
