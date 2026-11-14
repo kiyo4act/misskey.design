@@ -25,7 +25,7 @@
       "command": [
         "bash",
         "-c",
-        "set -eu; mkdir -p /misskey/.config; printf '%s' \"$MISSKEY_DEFAULT_YML\" > /misskey/.config/default.yml; exec pnpm run migrateandstart"
+        "set -eu; mkdir -p /misskey/.config; printf '%s' \"$MISSKEY_DEFAULT_YML\" > /misskey/.config/default.yml; exec node scripts/start.mjs --migrate"
       ],
       "secrets": [
         {
