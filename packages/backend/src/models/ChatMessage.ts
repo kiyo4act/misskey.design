@@ -84,7 +84,8 @@ export class MiChatMessage {
 	})
 	public reactions: string[];
 
-	@Index()
+	// 名前は migration 1776863312503-chat-drawing で作成したものに合わせる
+	@Index('IDX_chat_message_drawingId')
 	@Column({
 		...id(),
 		nullable: true,
@@ -94,6 +95,6 @@ export class MiChatMessage {
 	@ManyToOne(() => MiChatDrawing, {
 		onDelete: 'SET NULL',
 	})
-	@JoinColumn()
+	@JoinColumn({ foreignKeyConstraintName: 'FK_chat_message_drawingId' })
 	public drawing: MiChatDrawing | null;
 }

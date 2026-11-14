@@ -30,7 +30,10 @@ export type ChatDrawingStroke = {
 	text?: string;
 };
 
+// インデックス名・外部キー名は migration (1776863312503-chat-drawing / 1777313855341-chat-drawing-main-raster) で
+// 作成した名前に合わせる。省略すると TypeORM の自動命名と食い違い、check-migrations で差分が出る
 @Entity('chat_drawing')
+@Index('IDX_chat_drawing_user_pair', ['user1Id', 'user2Id'])
 export class MiChatDrawing {
 	@PrimaryColumn(id())
 	public id: string;
@@ -41,14 +44,14 @@ export class MiChatDrawing {
 	@Column({ type: 'timestamp with time zone' })
 	public updatedAt: Date;
 
-	@Index()
+	@Index('IDX_chat_drawing_createdById')
 	@Column({ ...id() })
 	public createdById: MiUser['id'];
 
 	@ManyToOne(() => MiUser, {
 		onDelete: 'CASCADE',
 	})
-	@JoinColumn()
+	@JoinColumn({ foreignKeyConstraintName: 'FK_chat_drawing_createdById' })
 	public createdBy: MiUser | null;
 
 	@Column({ ...id() })
@@ -57,17 +60,17 @@ export class MiChatDrawing {
 	@ManyToOne(() => MiUser, {
 		onDelete: 'CASCADE',
 	})
-	@JoinColumn()
+	@JoinColumn({ foreignKeyConstraintName: 'FK_chat_drawing_lastEditedById' })
 	public lastEditedBy: MiUser | null;
 
-	@Index()
+	@Index('IDX_chat_drawing_roomId')
 	@Column({ ...id(), nullable: true })
 	public roomId: MiChatRoom['id'] | null;
 
 	@ManyToOne(() => MiChatRoom, {
 		onDelete: 'CASCADE',
 	})
-	@JoinColumn()
+	@JoinColumn({ foreignKeyConstraintName: 'FK_chat_drawing_roomId' })
 	public room: MiChatRoom | null;
 
 	@Column({ ...id(), nullable: true })
@@ -76,7 +79,7 @@ export class MiChatDrawing {
 	@ManyToOne(() => MiUser, {
 		onDelete: 'CASCADE',
 	})
-	@JoinColumn()
+	@JoinColumn({ foreignKeyConstraintName: 'FK_chat_drawing_user1Id' })
 	public user1: MiUser | null;
 
 	@Column({ ...id(), nullable: true })
@@ -85,7 +88,7 @@ export class MiChatDrawing {
 	@ManyToOne(() => MiUser, {
 		onDelete: 'CASCADE',
 	})
-	@JoinColumn()
+	@JoinColumn({ foreignKeyConstraintName: 'FK_chat_drawing_user2Id' })
 	public user2: MiUser | null;
 
 	@Column('varchar', { length: 256, default: '' })
@@ -100,7 +103,7 @@ export class MiChatDrawing {
 	@Column('integer', { default: 768 })
 	public height: number;
 
-	@Index({ unique: true })
+	@Index('IDX_chat_drawing_imageAccessKey', { unique: true })
 	@Column('varchar', { length: 64, nullable: true })
 	public imageAccessKey: string | null;
 
@@ -111,7 +114,7 @@ export class MiChatDrawing {
 	// (new key per save) so cached fetches don't serve stale pixels. Lineart and draft
 	// strokes remain in `strokes` as vectors; main is fully rasterised so fill brushes can
 	// produce effects (texture, smudge, pixel-reading) that vector replay can't preserve.
-	@Index({ unique: true })
+	@Index('IDX_chat_drawing_mainImageAccessKey', { unique: true })
 	@Column('varchar', { length: 64, nullable: true })
 	public mainImageAccessKey: string | null;
 
