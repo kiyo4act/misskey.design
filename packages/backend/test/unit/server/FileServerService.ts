@@ -22,6 +22,7 @@ import { LoggerService } from '@/core/LoggerService.js';
 import { VideoProcessingService } from '@/core/VideoProcessingService.js';
 import { loadConfig, type Config } from '@/config.js';
 import { MiDriveFile } from '@/models/DriveFile.js';
+import { MiChatDrawing } from '@/models/ChatDrawing.js';
 import { FileServerService } from '@/server/FileServerService.js';
 import { FileServerFileResolver } from '@/server/file/FileServerFileResolver.js';
 
@@ -77,6 +78,7 @@ describe('FileServerService', () => {
 	let fastify: FastifyInstance;
 	let externalFastify: FastifyInstance;
 	let driveFilesRepository: Repository<MiDriveFile>;
+	let chatDrawingsRepository: Repository<MiChatDrawing>;
 	let internalStorageService: InternalStorageService;
 	let idService: IdService;
 	let config: Config;
@@ -147,6 +149,7 @@ describe('FileServerService', () => {
 		config = loadConfig();
 		db = await initTestDb(false);
 		driveFilesRepository = db.getRepository(MiDriveFile);
+		chatDrawingsRepository = db.getRepository(MiChatDrawing);
 
 		const loggerService = new LoggerService();
 		const sensitiveMediaDetectionService = {
@@ -164,6 +167,7 @@ describe('FileServerService', () => {
 		fileServerService = new FileServerService(
 			config,
 			driveFilesRepository as any,
+			chatDrawingsRepository as any,
 			fileInfoService,
 			downloadService,
 			imageProcessingService,
@@ -188,6 +192,7 @@ describe('FileServerService', () => {
 		externalFileServerService = new FileServerService(
 			externalConfig,
 			driveFilesRepository as any,
+			chatDrawingsRepository as any,
 			fileInfoService,
 			downloadService,
 			imageProcessingService,
